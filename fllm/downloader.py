@@ -36,6 +36,22 @@ GATED_MODELS = {
     "deepseek-ai": "DeepSeek",
 }
 
+def _get_hf_token() -> Optional[str]:
+    """Get HF token from environment or cache file."""
+    # Check env var first
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+
+    # Fallback: check huggingface-cli cache
+    hf_cache = Path.home() / ".cache" / "huggingface" / "token"
+    if hf_cache.exists():
+        try:
+            return hf_cache.read_text().strip()
+        except (OSError, IOError):
+            pass
+    return None
+
 class ModelDownloader:
     def __init__(self, cache_dir: Optional[Path] = None):
         self.cache_dir = cache_dir or default_cache_dir()
@@ -66,12 +82,15 @@ class ModelDownloader:
         from huggingface_hub import hf_hub_download
         from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
+        token = _get_hf_token()
+
         try:
             local = hf_hub_download(
                 repo_id=sel.gguf_repo,
                 filename=sel.gguf_filename,
                 local_dir=str(dest.parent),
                 local_dir_use_symlinks=False,
+                token=token,
             )
             return Path(local)
 

@@ -292,6 +292,15 @@ class HardwareScout:
         if self._is_wsl2:
             p.warnings.append("Running under WSL2. GPU passthrough depends on Windows driver version.")
 
+            # Check for AMD in WSL2 (ROCm support in WSL2 is limited)
+            if self._os == "Linux":
+                amd_check = self._run(["lspci"])
+                if amd_check and "AMD" in amd_check:
+                    p.warnings.append(
+                        "WSL2 + AMD GPU detected. ROCm support in WSL2 is experimental. "
+                        "Consider using native Linux or Windows for AMD GPUs."
+                    )
+
         # Docker warnings
         if self._is_docker:
             if not self._has_docker_gpu():

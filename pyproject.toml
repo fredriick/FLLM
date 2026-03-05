@@ -40,6 +40,8 @@ air = [
     "fastapi",
     "uvicorn",
     "torch",
+    # NOTE: torch 2.2.x doesn't support numpy 2.x. Remove this pin when upgrading to torch 2.3+
+    "numpy<2",
 ]
 all = [
     "llama-cpp-python>=0.2.90",
