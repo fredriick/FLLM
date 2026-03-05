@@ -30,6 +30,12 @@ def default_cache_dir() -> Path:
 # Downloader
 # ---------------------------------------------------------------------------
 
+GATED_MODELS = {
+    "meta-llama": "Llama",
+    "mistralai": "Mistral",
+    "deepseek-ai": "DeepSeek",
+}
+
 class ModelDownloader:
     def __init__(self, cache_dir: Optional[Path] = None):
         self.cache_dir = cache_dir or default_cache_dir()
@@ -45,7 +51,7 @@ class ModelDownloader:
             return dest
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        print(f"  ↓ Downloading {selection.family} {selection.size_label} "
+        print(f"  ↓ Downloading {selection.family.display} {selection.size.label} "
               f"({selection.quant_method}, ~{selection.estimated_size_gb:.1f} GB) …")
 
         try:
@@ -58,14 +64,65 @@ class ModelDownloader:
 
     def _download_hf_hub(self, sel: ModelSelection, dest: Path) -> Path:
         from huggingface_hub import hf_hub_download
+        from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
-        local = hf_hub_download(
-            repo_id=sel.gguf_repo,
-            filename=sel.gguf_filename,
-            local_dir=str(dest.parent),
-            local_dir_use_symlinks=False,
-        )
-        return Path(local)
+        try:
+            local = hf_hub_download(
+                repo_id=sel.gguf_repo,
+                filename=sel.gguf_filename,
+                local_dir=str(dest.parent),
+                local_dir_use_symlinks=False,
+            )
+            return Path(local)
+
+        except GatedRepoError:
+            self._handle_gated_model(sel.gguf_repo)
+        except RepositoryNotFoundError:
+            self._handle_missing_model(sel.gguf_repo)
+
+    def _handle_gated_model(self, repo: str):
+        """Handle gated models that require HF login."""
+        # Extract the organization
+        org = repo.split("/")[0] if "/" in repo else repo
+
+        # Find which model family it belongs to
+        model_name = GATED_MODELS.get(org, org)
+
+        print(f"""
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║  ERROR: Gated Model                                           ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  {repo[:56]:<56} ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  This model requires you to accept its license terms:          ║
+  ║                                                                  ║
+  ║  1. Visit: https://huggingface.co/{repo}                      ║
+  ║  2. Accept the license agreement                                ║
+  ║  3. Run: huggingface-cli login                                 ║
+  ║                                                                  ║
+  ║  Or set HF_TOKEN environment variable:                          ║
+  ║  export HF_TOKEN=your_token                                     ║
+  ╚══════════════════════════════════════════════════════════════════╝
+""", file=sys.stderr)
+        sys.exit(1)
+
+    def _handle_missing_model(self, repo: str):
+        """Handle missing models."""
+        print(f"""
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║  ERROR: Model Not Found                                        ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  {repo[:56]:<56} ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║  Possible causes:                                               ║
+  ║  - Model doesn't exist or was renamed                          ║
+  ║  - No GGUF files available for this quantization               ║
+  ║  - Repository is private (add --private flag or use HF_TOKEN)  ║
+  ║                                                                  ║
+  ║  Check available models: https://huggingface.co/{repo}         ║
+  ╚══════════════════════════════════════════════════════════════════╝
+""", file=sys.stderr)
+        sys.exit(1)
 
     # ── urllib fallback ───────────────────────────────────────────────────
 

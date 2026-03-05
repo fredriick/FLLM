@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional
 
 import psutil
@@ -54,18 +55,21 @@ class HardwareProfile:
     gpus: List[GPUInfo] = field(default_factory=list)
     total_vram_gb: float = 0.0
 
-    # ── System flags ────────────────────────────────────────────────────────
+    # ── System flags ───────────────────────────────────────────────────────
     unified_memory: bool = False       # Apple Silicon / AMD APU
+    is_wsl2: bool = False            # Running under WSL2
+    is_docker: bool = False           # Running in Docker
+    has_igpu: bool = False           # Has integrated GPU alongside discrete
     os: str = "Unknown"
     arch: str = "Unknown"
 
-    # ── Derived recommendations ──────────────────────────────────────────────
+    # ── Derived recommendations ─────────────────────────────────────────────
     tier: str = "C"                    # "A" | "B" | "C"
     optimal_quant_bits: int = 4
     max_context_tokens: int = 2048
     recommended_backend: str = "llama.cpp"
 
-    # ── Human-readable warnings ──────────────────────────────────────────────
+    # ── Human-readable warnings ─────────────────────────────────────────────
     warnings: List[str] = field(default_factory=list)
 
 
@@ -83,10 +87,48 @@ class HardwareScout:
         self.verbose = verbose
         self._os = platform.system()          # "Linux" | "Darwin" | "Windows"
         self._machine = platform.machine()    # "x86_64" | "arm64" | "AMD64" …
+        self._detect_environment()
         self.profile = HardwareProfile(
             os=self._os,
             arch=self._machine,
+            is_wsl2=self._is_wsl2,
+            is_docker=self._is_docker,
         )
+
+    def _detect_environment(self):
+        """Detect WSL2 and Docker environments."""
+        self._is_wsl2 = False
+        self._is_docker = False
+
+        # WSL2 detection
+        if self._os == "Linux":
+            # Check /proc/version for WSL
+            try:
+                with open("/proc/version", "r") as f:
+                    version = f.read().lower()
+                    if "microsoft" in version and "wsl2" in version:
+                        self._is_wsl2 = True
+            except (FileNotFoundError, PermissionError):
+                pass
+
+            # Alternative: check /proc/sys/fs/binfmt_misc/WSLInterop
+            if not self._is_wsl2:
+                if Path("/proc/sys/fs/binfmt_misc/WSLInterop").exists():
+                    self._is_wsl2 = True
+
+            # Docker detection
+            # Check for /.dockerenv file
+            if Path("/.dockerenv").exists():
+                self._is_docker = True
+
+            # Alternative: check cgroup
+            try:
+                with open("/proc/1/cgroup", "r") as f:
+                    cgroup = f.read()
+                    if "docker" in cgroup:
+                        self._is_docker = True
+            except (FileNotFoundError, PermissionError):
+                pass
 
     # ── Public entry point ───────────────────────────────────────────────────
 
@@ -246,6 +288,20 @@ class HardwareScout:
     def _detect_gpus(self):
         p = self.profile
 
+        # WSL2 warnings
+        if self._is_wsl2:
+            p.warnings.append("Running under WSL2. GPU passthrough depends on Windows driver version.")
+
+        # Docker warnings
+        if self._is_docker:
+            if not self._has_docker_gpu():
+                p.warnings.append(
+                    "Running in Docker without GPU passthrough. "
+                    "Use --gpus flag or NVIDIA Container Toolkit for GPU access."
+                )
+            else:
+                p.warnings.append("Running in Docker with GPU passthrough detected.")
+
         # Apple Silicon — unified memory, no discrete GPU
         if self._os == "Darwin" and ("arm" in self._machine.lower() or "M1" in platform.processor() or "M2" in platform.processor()):
             self._detect_apple_silicon(p)
@@ -262,14 +318,37 @@ class HardwareScout:
         if not p.gpus:
             self._detect_amd_gpus(p)
 
-        # Intel Arc
-        if not p.gpus:
-            self._detect_intel_gpus(p)
+        # Intel integrated/discrete GPUs (check for both iGPU and dGPU)
+        self._detect_intel_gpus(p)
 
         p.total_vram_gb = sum(g.vram_gb for g in p.gpus)
 
-        # Sort largest VRAM first
-        p.gpus.sort(key=lambda g: g.vram_gb, reverse=True)
+        # Sort largest VRAM first, prefer discrete over integrated
+        p.gpus.sort(key=lambda g: (g.vram_gb, g.vendor not in ("intel",)), reverse=True)
+
+        # Detect iGPU + dGPU combo
+        discrete_gpus = [g for g in p.gpus if g.vendor in ("nvidia", "amd")]
+        integrated_gpus = [g for g in p.gpus if g.vendor in ("intel",)]
+
+        if discrete_gpus and integrated_gpus:
+            p.has_igpu = True
+            # Use discrete GPU only for recommendations
+            p.total_vram_gb = sum(g.vram_gb for g in discrete_gpus)
+            p.warnings.append(
+                f"Detected {len(integrated_gpus)} integrated GPU(s). Using discrete GPU for inference."
+            )
+
+    def _has_docker_gpu(self) -> bool:
+        """Check if Docker has GPU passthrough."""
+        # Check nvidia-smi in container
+        out = self._run(["nvidia-smi"])
+        if out:
+            return True
+        # Check rocm-smi
+        out = self._run(["rocm-smi"])
+        if out:
+            return True
+        return False
 
     def _detect_apple_silicon(self, p: HardwareProfile):
         p.unified_memory = True
@@ -377,22 +456,81 @@ class HardwareScout:
                         pass
 
     def _detect_intel_gpus(self, p: HardwareProfile):
-        # Basic detection via lspci / wmic
+        # Basic detection via lspci / wmic / system_profiler
+        detected_intel = []
+
         if self._os == "Linux":
             out = self._run(["lspci"])
-            if out and "Intel" in out and ("Arc" in out or "Iris" in out):
+            if out:
+                # Intel integrated GPUs
+                if "Intel" in out:
+                    if "Iris" in out or "UHD" in out:
+                        # Integrated: estimate shared VRAM from system RAM
+                        vram_estimate = min(p.total_ram_gb / 4, 2.0)  # Typically 1-2GB shared
+                        gpu = GPUInfo(
+                            name="Intel Integrated GPU (UHD/Iris)",
+                            vram_gb=vram_estimate,
+                            vendor="intel",
+                            architecture="Gen12+",
+                            index=len(p.gpus),
+                        )
+                        detected_intel.append(gpu)
+                    elif "Arc" in out:
+                        # Discrete Arc GPU - try to get actual VRAM
+                        vram = self._get_intel_arc_vram()
+                        gpu = GPUInfo(
+                            name="Intel Arc (detected via lspci)",
+                            vram_gb=vram,
+                            vendor="intel",
+                            architecture="Xe-HPG",
+                            index=len(p.gpus),
+                        )
+                        detected_intel.append(gpu)
+
+        elif self._os == "Darwin" and self._machine == "x86_64":
+            # Intel Mac with Iris
+            out = self._run(["system_profiler", "SPDisplaysDataType"])
+            if out and "Intel" in out:
+                vram_estimate = min(p.total_ram_gb / 4, 1.5)
                 gpu = GPUInfo(
-                    name="Intel Arc/Iris (detected via lspci)",
-                    vram_gb=0.0,     # Shared; hard to detect without XE tools
+                    name="Intel Iris",
+                    vram_gb=vram_estimate,
                     vendor="intel",
-                    architecture="Xe",
-                    index=0,
+                    architecture="Gen11",
+                    index=len(p.gpus),
                 )
-                p.gpus.append(gpu)
-                p.warnings.append(
-                    "Intel GPU detected but VRAM could not be read. "
-                    "Install intel-gpu-tools for accurate detection."
-                )
+                detected_intel.append(gpu)
+
+        # Add detected Intel GPUs
+        for gpu in detected_intel:
+            p.gpus.append(gpu)
+
+        # Warning if we detected but couldn't get accurate VRAM
+        if detected_intel and any(g.vram_gb < 2 for g in detected_intel):
+            p.warnings.append(
+                "Intel integrated GPU detected with estimated shared VRAM. "
+                "For better detection, install Intel GPU tools or use discrete GPU."
+            )
+
+    def _get_intel_arc_vram(self) -> float:
+        """Try to get Intel Arc VRAM via various methods."""
+        # Try via intel_gpu_top or sysfs
+        for path in [
+            "/sys/class/drm/card0/meminfo",
+            "/sys/class/drm/card1/meminfo",
+        ]:
+            try:
+                with open(path, "r") as f:
+                    content = f.read()
+                    # Parse VRAM from meminfo
+                    m = re.search(r"vram.*?(\d+)\s*kB", content, re.IGNORECASE)
+                    if m:
+                        return float(m.group(1)) / (1024 * 1024)  # kB to GB
+            except (FileNotFoundError, PermissionError):
+                pass
+
+        # Fallback: estimate based on model
+        return 8.0  # Arc A770 has 8GB, A750 has 8GB, A380 has 6GB
 
     # ── Tier classification ──────────────────────────────────────────────────
 
