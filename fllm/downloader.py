@@ -89,7 +89,6 @@ class ModelDownloader:
                 repo_id=sel.gguf_repo,
                 filename=sel.gguf_filename,
                 local_dir=str(dest.parent),
-                local_dir_use_symlinks=False,
                 token=token,
             )
             return Path(local)

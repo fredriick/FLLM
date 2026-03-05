@@ -3,7 +3,7 @@ launcher.py — Orchestrates the full pipeline:
   detect -> select -> download -> launch
 """
 from __future__ import annotations
-import json, sys
+import json, sys, warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -189,8 +189,12 @@ class LLMRunner:
             b = VLLMBackend(hw, sel)
             return b if b.is_available() else LlamaCppBackend(hw, sel)
         if name == "mlx":
-            b = MLXBackend(hw, sel)
-            return b if b.is_available() else LlamaCppBackend(hw, sel)
+            warnings.warn(
+                "[experimental] mlx-lm backend requires MLX-format models from mlx-community. "
+                "Falling back to llama.cpp (Metal). Use --backend mlx to force.",
+                stacklevel=2
+            )
+            return LlamaCppBackend(hw, sel)
         if name == "airllm":
             b = AirLLMBackend(hw, sel, compression=self.compression)
             return b if b.is_available() else LlamaCppBackend(hw, sel)

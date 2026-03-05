@@ -120,7 +120,6 @@ class SpeculativeManager:
                 repo_id=self.family.draft_gguf_repo,
                 filename=self.family.draft_gguf_file,
                 local_dir=str(dest.parent),
-                local_dir_use_symlinks=False,
             )
             return Path(local)
         except ImportError:

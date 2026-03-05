@@ -83,7 +83,7 @@ fllm bench llama3 --output results.json
 | Tier | Hardware | Backend | What it does |
 |------|----------|---------|--------------|
 | **A** | NVIDIA GPU ≥8GB VRAM / AMD ROCm (experimental) | vLLM or llama.cpp (AMD: llama.cpp only) | Kernel fusion, continuous batching, PagedAttention |
-| **B** | Apple Silicon / APU with unified memory | mlx-lm (macOS) or llama.cpp | Zero-copy Metal execution |
+| **B** | Apple Silicon | llama.cpp (Metal) | mlx-lm experimental (--backend mlx) |
 | **C** | CPU only | llama.cpp | AVX-512/AVX2/NEON vectorised inference |
 | **AirLLM** | Any GPU with ≥4GB VRAM | AirLLM | Layer-wise loading, run 70B on 4GB, 405B on 8GB |
 

@@ -1,6 +1,10 @@
 """
 backends/mlx.py — Apple Silicon backend via mlx-lm.
 
+EXPERIMENTAL: mlx-lm backend requires MLX-format models (mlx-community HuggingFace org),
+not GGUF. This backend will not work with the standard GGUF download pipeline.
+Planned for v0.2.0 with a separate MLX registry and downloader path.
+
 Uses the MLX framework (Apple's Metal-optimised ML library).
 Runs in unified memory: no CPU↔GPU transfer overhead.
 Supports InteractiveChat with full template + /command support.

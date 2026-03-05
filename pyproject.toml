@@ -27,7 +27,7 @@ gpu = [
     "vllm>=0.4.0",
 ]
 apple = [
-    "mlx-lm>=0.16",
+    "llama-cpp-python>=0.2.90",
     "huggingface_hub>=0.24",
 ]
 air = [
