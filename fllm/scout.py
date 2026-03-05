@@ -96,9 +96,25 @@ class HardwareScout:
         )
 
     def _detect_environment(self):
-        """Detect WSL2 and Docker environments."""
+        """Detect WSL2, Docker, and Rosetta 2 environments."""
         self._is_wsl2 = False
         self._is_docker = False
+
+        # Rosetta 2 detection (macOS only)
+        if self._os == "Darwin":
+            try:
+                result = subprocess.run(
+                    ["sysctl", "-n", "sysctl.proc_translated"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.stdout.strip() == "1":
+                    self.profile.warnings.append(
+                        "Running under Rosetta 2 — reinstall Python as native ARM for Tier B performance."
+                    )
+            except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
+                pass
 
         # WSL2 detection
         if self._os == "Linux":
