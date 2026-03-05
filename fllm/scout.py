@@ -585,11 +585,8 @@ class HardwareScout:
             p.tier = "B"
             p.optimal_quant_bits = 4
             p.max_context_tokens = 32768
-            # macOS → mlx / llama.cpp metal; others → llama.cpp
-            if p.os == "Darwin":
-                p.recommended_backend = "mlc"
-            else:
-                p.recommended_backend = "llama.cpp"
+            # Apple Silicon uses llama.cpp with Metal (mlx-lm is experimental)
+            p.recommended_backend = "llama.cpp"
             return
 
         # ── Tier C: CPU-only ──
