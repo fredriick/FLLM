@@ -29,6 +29,8 @@ gpu = [
 apple = [
     "llama-cpp-python>=0.2.90",
     "huggingface_hub>=0.24",
+    "fastapi",
+    "uvicorn",
 ]
 air = [
     "airllm>=2.0",
