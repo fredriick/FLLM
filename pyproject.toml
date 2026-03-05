@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fllm"
+version = "0.1.0"
+description = "Universal LLM runner — auto-detects hardware and runs the best model"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+dependencies = [
+    "psutil>=5.9",
+    "airllm>=2.0",
+]
+
+[project.optional-dependencies]
+cpu = [
+    "llama-cpp-python>=0.2.90",
+    "py-cpuinfo>=9.0",
+    "huggingface_hub>=0.24",
+]
+gpu = [
+    "llama-cpp-python>=0.2.90",
+    "py-cpuinfo>=9.0",
+    "huggingface_hub>=0.24",
+    "vllm>=0.4.0",
+]
+apple = [
+    "mlx-lm>=0.16",
+    "py-cpuinfo>=9.0",
+    "huggingface_hub>=0.24",
+]
+air = [
+    "airllm>=2.0",
+    "bitsandbytes",
+    "py-cpuinfo>=9.0",
+    "huggingface_hub>=0.24",
+    "fastapi",
+    "uvicorn",
+    "torch",
+]
+all = [
+    "llama-cpp-python>=0.2.90",
+    "py-cpuinfo>=9.0",
+    "huggingface_hub>=0.24",
+    "vllm>=0.4.0",
+    "mlx-lm>=0.16",
+    "airllm>=2.0",
+    "bitsandbytes",
+]
+
+[project.scripts]
+fllm = "fllm.cli:main"
+
+[tool.setuptools]
+packages = ["fllm"]
