@@ -81,6 +81,8 @@ class AirLLMBackend:
             role: str
             content: str
 
+        MAX_TOKENS_CAP = 2048
+
         class ChatCompletionRequest(BaseModel):
             model: str
             messages: List[ChatMessage]
@@ -93,56 +95,64 @@ class AirLLMBackend:
             if request.stream:
                 raise HTTPException(status_code=400, detail="Streaming not supported")
 
+            capped_max_tokens = min(request.max_tokens, MAX_TOKENS_CAP)
             prompt = self._build_prompt(request.messages)
 
-            input_tokens = self._tokenizer(
-                [prompt],
-                return_tensors="pt",
-                return_attention_mask=False,
-                truncation=True,
-                max_length=self.sel.context_tokens,
-                padding=False,
-            )
+            input_ids = None
+            generation_output = None
+            try:
+                input_tokens = self._tokenizer(
+                    [prompt],
+                    return_tensors="pt",
+                    return_attention_mask=False,
+                    truncation=True,
+                    max_length=self.sel.context_tokens,
+                    padding=False,
+                )
 
-            if torch.cuda.is_available():
-                input_ids = input_tokens["input_ids"].cuda()
-            else:
-                input_ids = input_tokens["input_ids"]
+                if torch.cuda.is_available():
+                    input_ids = input_tokens["input_ids"].cuda()
+                else:
+                    input_ids = input_tokens["input_ids"]
 
-            generation_output = self._model.generate(
-                input_ids,
-                max_new_tokens=request.max_tokens,
-                use_cache=True,
-                return_dict_in_generate=True,
-            )
+                generation_output = self._model.generate(
+                    input_ids,
+                    max_new_tokens=capped_max_tokens,
+                    use_cache=False,
+                    return_dict_in_generate=True,
+                )
 
-            output_text = self._tokenizer.decode(
-                generation_output.sequences[0]
-            )
+                output_text = self._tokenizer.decode(
+                    generation_output.sequences[0]
+                )
 
-            response = {
-                "id": "chatcmpl-airllm",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": request.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": output_text,
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": input_ids.shape[1],
-                    "completion_tokens": request.max_tokens,
-                    "total_tokens": input_ids.shape[1] + request.max_tokens,
-                },
-            }
+                response = {
+                    "id": "chatcmpl-airllm",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": request.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": output_text,
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": input_ids.shape[1],
+                        "completion_tokens": capped_max_tokens,
+                        "total_tokens": input_ids.shape[1] + capped_max_tokens,
+                    },
+                }
 
-            return response
+                return response
+            finally:
+                del generation_output, input_ids
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         @app.get("/v1/models")
         async def list_models():

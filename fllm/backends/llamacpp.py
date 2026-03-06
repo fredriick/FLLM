@@ -11,7 +11,10 @@ Supports:
 
 from __future__ import annotations
 
+import atexit
+import gc
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -132,7 +135,24 @@ class LlamaCppBackend:
                     "--draft", str(spec.n_draft_tokens)]
 
         _print_server_info(port, ngl, ctx, threads, spec)
-        subprocess.run(cmd)
+        proc = subprocess.Popen(cmd)
+
+        def _kill_server():
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+        atexit.register(_kill_server)
+        signal.signal(signal.SIGTERM, lambda *_: (_kill_server(), sys.exit(0)))
+
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            _kill_server()
+        sys.exit(proc.returncode or 0)
 
     # ── Interactive ───────────────────────────────────────────────────────────
 
@@ -143,12 +163,12 @@ class LlamaCppBackend:
         renderer: TemplateRenderer,
         spec: Optional[SpecConfig] = None,
     ):
-        generate_fn = self._make_generate_fn(model_path, spec)
-        chat = InteractiveChat(session, renderer, generate_fn)
+        generate_fn, cleanup_fn = self._make_generate_fn(model_path, spec)
+        chat = InteractiveChat(session, renderer, generate_fn, cleanup_fn=cleanup_fn)
         chat.run()
 
     def _make_generate_fn(self, model_path: Path, spec: Optional[SpecConfig]):
-        """Return a callable (prompt: str) -> str using llama-cpp-python."""
+        """Return (generate_fn, cleanup_fn) using llama-cpp-python."""
         try:
             from llama_cpp import Llama
         except ImportError:
@@ -175,7 +195,12 @@ class LlamaCppBackend:
                                                      "</s>", "User:", "\nUser:"])
             return out["choices"][0]["text"].strip()
 
-        return _generate
+        def _cleanup():
+            nonlocal llm
+            del llm
+            gc.collect()
+
+        return _generate, _cleanup
 
     # ── Python-bindings server fallback ───────────────────────────────────────
 

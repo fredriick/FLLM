@@ -10,6 +10,9 @@ Features:
 
 from __future__ import annotations
 
+import atexit
+import gc
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -89,7 +92,24 @@ class VLLMBackend:
         print(f"     Spec decoding : {spec_str}")
         print(f"\n  OpenAI-compatible API at http://127.0.0.1:{port}/v1\n")
 
-        subprocess.run(cmd)
+        proc = subprocess.Popen(cmd)
+
+        def _kill_server():
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+        atexit.register(_kill_server)
+        signal.signal(signal.SIGTERM, lambda *_: (_kill_server(), sys.exit(0)))
+
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            _kill_server()
+        sys.exit(proc.returncode or 0)
 
     # ── Interactive ───────────────────────────────────────────────────────────
 
@@ -124,5 +144,15 @@ class VLLMBackend:
             out = llm.generate([prompt], params)
             return out[0].outputs[0].text.strip()
 
-        chat = InteractiveChat(session, renderer, _generate)
+        def _cleanup():
+            nonlocal llm
+            del llm
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except (ImportError, RuntimeError):
+                pass
+            gc.collect()
+
+        chat = InteractiveChat(session, renderer, _generate, cleanup_fn=_cleanup)
         chat.run()

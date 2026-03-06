@@ -73,8 +73,16 @@ class ChatSession:
 
     # ── History helpers ───────────────────────────────────────────────────
 
+    MAX_HISTORY = 100
+
     def add(self, role: str, content: str, tokens: Optional[int] = None):
         self.messages.append(Message(role=role, content=content, tokens=tokens))
+        if len(self.messages) > self.MAX_HISTORY:
+            # Keep system messages, trim oldest non-system messages
+            system_msgs = [m for m in self.messages if m.role == "system"]
+            non_system = [m for m in self.messages if m.role != "system"]
+            keep = self.MAX_HISTORY - len(system_msgs)
+            self.messages = system_msgs + non_system[-keep:]
 
     def history_for_template(self) -> List[dict]:
         """Return messages (excluding system) as plain dicts for template rendering."""
@@ -139,59 +147,65 @@ class InteractiveChat:
         renderer: TemplateRenderer,
         generate_fn: Callable[[str], str],
         session_dir: Optional[Path] = None,
+        cleanup_fn: Optional[Callable] = None,
     ):
         self.session = session
         self.renderer = renderer
         self.generate = generate_fn
         self.session_dir = session_dir or Path.home() / ".cache" / "fllm" / "sessions"
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self._cleanup_fn = cleanup_fn
 
     def run(self):
         self._print_header()
-        while True:
-            try:
-                raw = input("\nYou: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print("\n\nSession ended.")
-                self._auto_save()
-                break
-
-            if not raw:
-                continue
-
-            if raw.startswith("/"):
-                if self._handle_command(raw):
+        try:
+            while True:
+                try:
+                    raw = input("\nYou: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("\n\nSession ended.")
+                    self._auto_save()
                     break
-                continue
 
-            # Normal message
-            self.session.add("user", raw)
-            prompt = self.renderer.render(self.session)
+                if not raw:
+                    continue
 
-            # Token budget warning
-            pct = self.session.context_usage_pct()
-            if pct > 80:
-                print(f"\n  ⚠  Context {pct:.0f}% full — consider /clear", file=sys.stderr)
+                if raw.startswith("/"):
+                    if self._handle_command(raw):
+                        break
+                    continue
 
-            # Generate
-            print("\nAssistant: ", end="", flush=True)
-            t0 = time.time()
-            try:
-                reply = self.generate(prompt)
-            except Exception as e:
-                print(f"\n  ✗ Generation error: {e}", file=sys.stderr)
-                self.session.messages.pop()   # Remove the user message
-                continue
+                # Normal message
+                self.session.add("user", raw)
+                prompt = self.renderer.render(self.session)
 
-            elapsed = time.time() - t0
-            # Estimate tokens per second (rough)
-            reply_tokens = len(reply) // 4
-            tps = reply_tokens / elapsed if elapsed > 0 else 0
+                # Token budget warning
+                pct = self.session.context_usage_pct()
+                if pct > 80:
+                    print(f"\n  ⚠  Context {pct:.0f}% full — consider /clear", file=sys.stderr)
 
-            print(reply)
-            print(f"\n  [{reply_tokens}t  {tps:.1f} tok/s  {elapsed:.2f}s]", file=sys.stderr)
+                # Generate
+                print("\nAssistant: ", end="", flush=True)
+                t0 = time.time()
+                try:
+                    reply = self.generate(prompt)
+                except Exception as e:
+                    print(f"\n  ✗ Generation error: {e}", file=sys.stderr)
+                    self.session.messages.pop()   # Remove the user message
+                    continue
 
-            self.session.add("assistant", reply, tokens=reply_tokens)
+                elapsed = time.time() - t0
+                # Estimate tokens per second (rough)
+                reply_tokens = len(reply) // 4
+                tps = reply_tokens / elapsed if elapsed > 0 else 0
+
+                print(reply)
+                print(f"\n  [{reply_tokens}t  {tps:.1f} tok/s  {elapsed:.2f}s]", file=sys.stderr)
+
+                self.session.add("assistant", reply, tokens=reply_tokens)
+        finally:
+            if self._cleanup_fn:
+                self._cleanup_fn()
 
     # ── Commands ─────────────────────────────────────────────────────────────
 

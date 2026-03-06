@@ -12,6 +12,9 @@ Supports InteractiveChat with full template + /command support.
 
 from __future__ import annotations
 
+import atexit
+import gc
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -75,7 +78,24 @@ class MLXBackend:
         print(f"     Memory  : {self.hw.total_ram_gb:.0f} GB unified")
         print(f"\n  OpenAI-compatible API at http://127.0.0.1:{port}/v1\n")
 
-        subprocess.run(cmd)
+        proc = subprocess.Popen(cmd)
+
+        def _kill_server():
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+        atexit.register(_kill_server)
+        signal.signal(signal.SIGTERM, lambda *_: (_kill_server(), sys.exit(0)))
+
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            _kill_server()
+        sys.exit(proc.returncode or 0)
 
     # ── Interactive ───────────────────────────────────────────────────────────
 
@@ -104,5 +124,10 @@ class MLXBackend:
                 verbose=False,
             )
 
-        chat = InteractiveChat(session, renderer, _generate)
+        def _cleanup():
+            nonlocal model, tokenizer
+            del model, tokenizer
+            gc.collect()
+
+        chat = InteractiveChat(session, renderer, _generate, cleanup_fn=_cleanup)
         chat.run()

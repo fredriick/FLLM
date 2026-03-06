@@ -3,7 +3,7 @@ launcher.py — Orchestrates the full pipeline:
   detect -> select -> download -> launch
 """
 from __future__ import annotations
-import json, sys, warnings
+import gc, json, sys, warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -137,10 +137,12 @@ class LLMRunner:
             system_prompt=system_prompt,
             context_limit=sel.context_tokens,
         )
+        generate_fn, cleanup_fn = self._make_generate_fn(backend, path, sel)
         InteractiveChat(session=session, renderer=renderer,
-                        generate_fn=self._make_generate_fn(backend, path, sel)).run()
+                        generate_fn=generate_fn, cleanup_fn=cleanup_fn).run()
 
     def _make_generate_fn(self, backend, path, sel):
+        """Return (generate_fn, cleanup_fn) tuple."""
         if "llama" in backend.name.lower():
             try:
                 from llama_cpp import Llama
@@ -152,7 +154,11 @@ class LLMRunner:
                     out = llm.create_completion(prompt, max_tokens=1024,
                                                stop=["<|im_end|>","<|eot_id|>","<end_of_turn>"])
                     return out["choices"][0]["text"].strip()
-                return _gen
+                def _cleanup():
+                    nonlocal llm
+                    del llm
+                    gc.collect()
+                return _gen, _cleanup
             except ImportError:
                 pass
         if "mlx" in backend.name.lower() or "mlc" in backend.name.lower():
@@ -161,10 +167,14 @@ class LLMRunner:
                 model, tokenizer = load(sel.mlx_repo or sel.hf_repo)
                 def _gen(prompt):
                     return mlx_gen(model, tokenizer, prompt=prompt, max_tokens=1024, verbose=False)
-                return _gen
+                def _cleanup():
+                    nonlocal model, tokenizer
+                    del model, tokenizer
+                    gc.collect()
+                return _gen, _cleanup
             except ImportError:
                 pass
-        return lambda prompt: "[Install llama-cpp-python for interactive mode]"
+        return lambda prompt: "[Install llama-cpp-python for interactive mode]", None
 
     def _run_bench(self, sel, path, backend, output_path=None):
         from .benchmark import Benchmarker, llamacpp_generate_fn
@@ -182,10 +192,14 @@ class LLMRunner:
             self.cache_dir.parent / "benchmarks" /
             f"{sel.family.key}_{sel.size.label}_{sel.quant_method}.json"
         )
-        Benchmarker(generate_fn=raw,
-                    model_label=f"{sel.family.display} {sel.size.label}",
-                    backend_name=backend.name, hw_tier=self._hw.tier,
-                    quant_method=sel.quant_method, output_path=save).run()
+        try:
+            Benchmarker(generate_fn=raw,
+                        model_label=f"{sel.family.display} {sel.size.label}",
+                        backend_name=backend.name, hw_tier=self._hw.tier,
+                        quant_method=sel.quant_method, output_path=save).run()
+        finally:
+            del llm
+            gc.collect()
 
     def _build_backend(self, hw, sel):
         name = self.force_backend or hw.recommended_backend
