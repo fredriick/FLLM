@@ -566,17 +566,18 @@ class HardwareScout:
         has_discrete = any(g.vendor in ("nvidia", "amd") for g in p.gpus)
         if has_discrete and p.total_vram_gb >= 8:
             p.tier = "A"
+            # More conservative context based on VRAM
             if p.total_vram_gb >= 48:
-                p.optimal_quant_bits = 4
-                p.max_context_tokens = 32768
-                p.recommended_backend = "vllm"
-            elif p.total_vram_gb >= 24:
                 p.optimal_quant_bits = 4
                 p.max_context_tokens = 16384
                 p.recommended_backend = "vllm"
-            else:
+            elif p.total_vram_gb >= 24:
                 p.optimal_quant_bits = 4
                 p.max_context_tokens = 8192
+                p.recommended_backend = "vllm"
+            else:
+                p.optimal_quant_bits = 4
+                p.max_context_tokens = 4096
                 p.recommended_backend = "llama.cpp"   # vLLM needs >= ~10 GB free
             return
 
@@ -584,7 +585,13 @@ class HardwareScout:
         if p.unified_memory or (p.total_ram_gb >= 32 and not has_discrete):
             p.tier = "B"
             p.optimal_quant_bits = 4
-            p.max_context_tokens = 32768
+            # Conservative context for unified memory - can easily OOM with large context
+            if p.total_ram_gb >= 64:
+                p.max_context_tokens = 8192
+            elif p.total_ram_gb >= 32:
+                p.max_context_tokens = 4096
+            else:
+                p.max_context_tokens = 2048
             # Apple Silicon uses llama.cpp with Metal (mlx-lm is experimental)
             p.recommended_backend = "llama.cpp"
             return
@@ -594,13 +601,16 @@ class HardwareScout:
         p.max_context_tokens = 2048
         if "AVX512" in p.cpu_instructions or "AMX" in p.cpu_instructions:
             p.optimal_quant_bits = 3
-            p.max_context_tokens = 4096
+            p.max_context_tokens = 2048
         elif "AVX2" in p.cpu_instructions:
             p.optimal_quant_bits = 4
+            p.max_context_tokens = 2048
         elif "NEON" in p.cpu_instructions:
             p.optimal_quant_bits = 4
+            p.max_context_tokens = 2048
         else:
             p.optimal_quant_bits = 8
+            p.max_context_tokens = 1024
             p.warnings.append(
                 "No modern SIMD instructions found. Inference will be very slow."
             )

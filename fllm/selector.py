@@ -5,9 +5,9 @@ from typing import Optional
 from .scout import HardwareProfile
 from .registry import FamilyEntry, SizeEntry, resolve, list_families
 
-# KV cache estimate: ~0.5MB per token per 7B params (fp16)
-# This scales roughly with model size
-_KV_CACHE_PER_B_PARAM_PER_TOKEN = 0.000015  # MB per param per token
+# KV cache estimate for llama.cpp with PagedAttention
+# Rough rule: ~2MB per 1B parameters per 1K context tokens (conservative)
+_KV_CACHE_MB_PER_1B_PER_1K = 2.0  # MB per 1B params per 1K tokens
 
 @dataclass
 class ModelSelection:
@@ -34,10 +34,8 @@ def _est(params_b, bits):
 
 def _est_kv_cache(params_b: float, context_tokens: int) -> float:
     """Estimate KV cache memory in GB based on model size and context length."""
-    # Rough estimate: scales with model params and context length
-    # For 7B @ 4096 context ≈ 2GB KV cache
-    mb_per_token = params_b * _KV_CACHE_PER_B_PARAM_PER_TOKEN
-    total_mb = mb_per_token * context_tokens
+    mb_per_token = params_b * _KV_CACHE_MB_PER_1B_PER_1K * (context_tokens / 1024)
+    total_mb = mb_per_token * 32  # Assume ~32 layers for typical models
     return round(total_mb / 1024, 2)  # Convert to GB
 
 class ModelSelector:
@@ -61,9 +59,10 @@ class ModelSelector:
         min_kv_cache = _est_kv_cache(smallest_size.params_b, context)
 
         # For larger models, KV cache is proportionally larger
-        budget = (hw.total_vram_gb * 0.75 if hw.tier == "A"  # Leave room for KV cache
-                  else hw.total_ram_gb * 0.60 if hw.tier == "B"
-                  else hw.total_ram_gb * 0.45)
+        # Use more conservative budgets to prevent OOM
+        budget = (hw.total_vram_gb * 0.60 if hw.tier == "A"  # Leave 40% for KV cache + overhead
+                  else hw.total_ram_gb * 0.40 if hw.tier == "B"  # Leave 60% for KV cache + overhead
+                  else hw.total_ram_gb * 0.30)  # Leave 70% for KV cache + overhead
 
         bits = hw.optimal_quant_bits
         quant = _BITS_TO_QUANT.get(bits, "Q4_K_M")
@@ -111,10 +110,10 @@ class ModelSelector:
 
         est = _est(chosen.params_b, bits)
         kv_overhead = _est_kv_cache(chosen.params_b, context)
-        fits = hw.tier == "A" and (est + kv_overhead) <= hw.total_vram_gb * 0.85
+        fits = hw.tier == "A" and (est + kv_overhead) <= hw.total_vram_gb * 0.60
 
         # Warn if context is too large for unified memory (Tier B)
-        if hw.tier == "B" and context >= 8192 and (est + kv_overhead) > hw.total_ram_gb * 0.5:
+        if hw.tier == "B" and context >= 4096 and (est + kv_overhead) > hw.total_ram_gb * 0.4:
             hw.warnings.append(
                 f"High context ({context} tokens) may cause OOM on {hw.total_ram_gb:.0f}GB unified memory. "
                 f"Consider using --tier C or a smaller model."
