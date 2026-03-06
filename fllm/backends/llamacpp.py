@@ -182,6 +182,7 @@ class LlamaCppBackend:
     def _py_server(self, model_path: Path, port: int):
         try:
             from llama_cpp.server.app import create_app
+            from llama_cpp.server.settings import ModelSettings, ServerSettings, Settings
             import uvicorn
         except ImportError:
             print("ERROR: Neither llama-server binary nor llama-cpp-python found.",
@@ -190,10 +191,18 @@ class LlamaCppBackend:
             sys.exit(1)
 
         ngl = _gpu_layers(self.hw, self.sel)
-        app = create_app(
+        model_settings = ModelSettings(
             model=str(model_path),
             n_ctx=self.sel.context_tokens,
             n_gpu_layers=999 if ngl < 0 else ngl,
+        )
+        server_settings = ServerSettings(
+            host="127.0.0.1",
+            port=port,
+        )
+        app = create_app(
+            model_settings=[model_settings],
+            server_settings=server_settings,
         )
         print(f"\n  ▶  llama-cpp-python server  →  http://127.0.0.1:{port}/v1")
         uvicorn.run(app, host="127.0.0.1", port=port)
