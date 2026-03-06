@@ -94,13 +94,17 @@ class HardwareScout:
             is_wsl2=self._is_wsl2,
             is_docker=self._is_docker,
         )
+        if self._rosetta2_warning:
+            self.profile.warnings.append(self._rosetta2_warning)
 
     def _detect_environment(self):
         """Detect WSL2, Docker, and Rosetta 2 environments."""
         self._is_wsl2 = False
         self._is_docker = False
+        self._rosetta2_warning = None
 
         # Rosetta 2 detection (macOS only)
+        self._is_rosetta2 = False
         if self._os == "Darwin":
             try:
                 result = subprocess.run(
@@ -110,8 +114,10 @@ class HardwareScout:
                     timeout=5,
                 )
                 if result.stdout.strip() == "1":
-                    self.profile.warnings.append(
-                        "Running under Rosetta 2 — reinstall Python as native ARM for Tier B performance."
+                    self._is_rosetta2 = True
+                    self._machine = "arm64"  # Correct the arch for downstream detection
+                    self._rosetta2_warning = (
+                        "Running under Rosetta 2 — reinstall Python as native ARM for best performance."
                     )
             except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
                 pass
@@ -179,7 +185,7 @@ class HardwareScout:
                 p.cpu_instructions.append("AVX2")
             if "amx_bf16" in flags:
                 p.cpu_instructions.append("AMX")
-            if "neon" in flags or (self._os == "Darwin" and "arm" in self._machine.lower()):
+            if "neon" in flags or (self._os == "Darwin" and ("arm" in self._machine.lower() or self._is_rosetta2)):
                 p.cpu_instructions.append("NEON")
         except ImportError:
             p.cpu_model = platform.processor() or "Unknown"
@@ -328,7 +334,13 @@ class HardwareScout:
                 p.warnings.append("Running in Docker with GPU passthrough detected.")
 
         # Apple Silicon — unified memory, no discrete GPU
-        if self._os == "Darwin" and ("arm" in self._machine.lower() or "M1" in platform.processor() or "M2" in platform.processor()):
+        # Check arch (arm64), Rosetta 2, or Apple M-series CPU name
+        is_apple_silicon = (
+            "arm" in self._machine.lower()
+            or self._is_rosetta2
+            or any(f"M{n}" in (p.cpu_model or "") for n in range(1, 10))
+        )
+        if self._os == "Darwin" and is_apple_silicon:
             self._detect_apple_silicon(p)
             return
 
@@ -378,9 +390,9 @@ class HardwareScout:
     def _detect_apple_silicon(self, p: HardwareProfile):
         p.unified_memory = True
         # sysctl gives us the chip name
-        chip = self._run(["sysctl", "-n", "machdep.cpu.brand_string"]) or ""
+        chip = (self._run(["sysctl", "-n", "machdep.cpu.brand_string"]) or "").strip()
         # On Apple Silicon this is often empty; try system_profiler
-        if not chip.strip():
+        if not chip:
             sp = self._run(["system_profiler", "SPHardwareDataType"]) or ""
             m = re.search(r"Chip:\s*(.+)", sp)
             chip = m.group(1).strip() if m else "Apple Silicon"
