@@ -112,6 +112,14 @@ class ModelSelector:
         est = _est(chosen.params_b, bits)
         kv_overhead = _est_kv_cache(chosen.params_b, context)
         fits = hw.tier == "A" and (est + kv_overhead) <= hw.total_vram_gb * 0.85
+
+        # Warn if context is too large for unified memory (Tier B)
+        if hw.tier == "B" and context >= 8192 and (est + kv_overhead) > hw.total_ram_gb * 0.5:
+            hw.warnings.append(
+                f"High context ({context} tokens) may cause OOM on {hw.total_ram_gb:.0f}GB unified memory. "
+                f"Consider using --tier C or a smaller model."
+            )
+
         label = chosen.label
         def fill(t):
             return (t or "").replace("{size}", label).replace("{name}", entry.display).replace("{quant}", quant)

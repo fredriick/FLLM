@@ -41,10 +41,12 @@ def _run_args(sub):
                      help="Override backend.")
     sub.add_argument("--compression", choices=["4bit","8bit",None], default=None,
                      help="AirLLM compression (4bit or 8bit).")
+    sub.add_argument("--context", type=int, default=None,
+                     help="Context length (default: auto). Lower = less memory.")
     sub.add_argument("--model-path", type=Path, default=None,
                      help="Use a local GGUF file instead of downloading.")
     sub.add_argument("--cache-dir", type=Path, default=None,
-                      help="Override model cache directory (~/.cache/fllm).")
+                       help="Override model cache directory (~/.cache/fllm).")
     sub.add_argument("--no-spec", action="store_true",
                      help="Disable speculative decoding.")
     sub.add_argument("--verbose", action="store_true",
@@ -144,6 +146,7 @@ def cmd_run(args):
         force_backend=args.backend,
         use_speculative=not args.no_spec,
         compression=args.compression,
+        context=getattr(args, "context", None),
     )
     runner.run(
         family=args.family,

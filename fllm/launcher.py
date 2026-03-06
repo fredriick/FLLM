@@ -22,13 +22,15 @@ Mode = Literal["server", "interactive", "bench"]
 
 class LLMRunner:
     def __init__(self, cache_dir=None, verbose=False, force_tier=None,
-                 force_backend=None, use_speculative=True, compression=None):
+                 force_backend=None, use_speculative=True, compression=None,
+                 context=None):
         self.cache_dir = cache_dir or default_cache_dir()
         self.verbose = verbose
         self.force_tier = force_tier
         self.force_backend = force_backend
         self.use_speculative = use_speculative
         self.compression = compression
+        self.context = context
         self._hw = None
         self._sel = None
 
@@ -37,6 +39,8 @@ class LLMRunner:
             self._hw = HardwareScout(verbose=self.verbose).detect_all()
             if self.force_tier:
                 self._hw.tier = self.force_tier.upper()
+            if self.context:
+                self._hw.max_context_tokens = self.context
         return self._hw
 
     def select_model(self, family):
