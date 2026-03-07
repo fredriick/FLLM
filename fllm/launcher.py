@@ -115,7 +115,50 @@ class LLMRunner:
         for f in families:
             sizes = ", ".join(s.label for s in f.sizes)
             print(f"  {f.key:<12} {f.display:<20} {sizes}")
+
+        # Show downloaded models
+        downloaded = self._list_downloaded()
+        if downloaded:
+            total_size = sum(size for _, _, size in downloaded)
+            print(f"\n  Downloaded models ({len(downloaded)}, {total_size:.1f} GB total)\n")
+            for name, path, size in downloaded:
+                print(f"  {name:<50} {size:.1f} GB")
+            print(f"\n  Cache: {self.cache_dir}")
+            print(f"  Remove: fllm models --remove <filename>")
+        else:
+            print(f"\n  No downloaded models found.")
+
         print(f"\n  Run 'fllm run <model>' to start.\n")
+
+    def _list_downloaded(self):
+        """Return list of (display_name, path, size_gb) for cached models."""
+        downloaded = []
+        if not self.cache_dir.exists():
+            return downloaded
+        for gguf in sorted(self.cache_dir.rglob("*.gguf")):
+            size_gb = gguf.stat().st_size / (1024 ** 3)
+            downloaded.append((gguf.name, gguf, size_gb))
+        return downloaded
+
+    def remove_model(self, name):
+        """Remove a downloaded model by filename."""
+        import shutil
+        for gguf in self.cache_dir.rglob("*.gguf"):
+            if gguf.name == name:
+                parent = gguf.parent
+                gguf.unlink()
+                print(f"  Removed: {gguf}")
+                # Clean up empty parent directory
+                if parent != self.cache_dir and not any(parent.iterdir()):
+                    shutil.rmtree(parent)
+                    print(f"  Cleaned: {parent.name}/")
+                return
+        print(f"  Model not found: {name}")
+        downloaded = self._list_downloaded()
+        if downloaded:
+            print(f"  Available models:")
+            for dname, _, size in downloaded:
+                print(f"    {dname} ({size:.1f} GB)")
 
     def bench(self, family, model_path=None, output=None):
         hw = self.detect()

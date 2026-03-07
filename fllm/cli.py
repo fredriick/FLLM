@@ -77,7 +77,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("info", help="Print hardware profile as JSON.")
 
     # ── models ───────────────────────────────────────────────────────────────
-    sub.add_parser("models", help="List all supported model families.")
+    mp = sub.add_parser("models", help="List supported and downloaded models.")
+    mp.add_argument("--remove", metavar="FILENAME", default=None,
+                    help="Remove a downloaded model by filename (e.g. Qwen2.5-3B-Instruct-Q4_K_M.gguf)")
 
     # ── sessions ─────────────────────────────────────────────────────────────
     sp = sub.add_parser("sessions", help="List saved chat sessions.")
@@ -113,10 +115,15 @@ def cmd_info(args):
     LLMRunner(verbose=getattr(args, "verbose", False)).info()
 
 
-def cmd_models(_args):
+def cmd_models(args):
     print(BANNER)
     from fllm.launcher import LLMRunner
-    LLMRunner().models()
+    runner = LLMRunner()
+    remove_name = getattr(args, "remove", None)
+    if remove_name:
+        runner.remove_model(remove_name)
+    else:
+        runner.models()
 
 
 def cmd_sessions(args):
