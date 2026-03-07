@@ -3,7 +3,7 @@ launcher.py — Orchestrates the full pipeline:
   detect -> select -> download -> launch
 """
 from __future__ import annotations
-import gc, json, sys, warnings
+import gc, json, os, sys, warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -148,8 +148,19 @@ class LLMRunner:
                 from llama_cpp import Llama
                 from .backends.llamacpp import _gpu_layers
                 ngl = _gpu_layers(self._hw, sel)
-                llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
-                            n_gpu_layers=ngl if ngl >= 0 else 999, verbose=False)
+                try:
+                    _fd = os.dup(2)
+                    os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
+                    try:
+                        llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
+                                    n_gpu_layers=ngl if ngl >= 0 else 999, verbose=False)
+                    finally:
+                        os.dup2(_fd, 2)
+                        os.close(_fd)
+                except (ValueError, RuntimeError):
+                    print("  ⚠  GPU init failed, retrying CPU-only …", file=sys.stderr)
+                    llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
+                                n_gpu_layers=0, verbose=False)
                 def _gen(prompt):
                     out = llm.create_completion(prompt, max_tokens=1024,
                                                stop=["<|im_end|>","<|eot_id|>","<end_of_turn>"])
@@ -182,8 +193,19 @@ class LLMRunner:
             from llama_cpp import Llama
             from .backends.llamacpp import _gpu_layers
             ngl = _gpu_layers(self._hw, sel)
-            llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
-                        n_gpu_layers=ngl if ngl >= 0 else 999, verbose=False)
+            try:
+                _fd = os.dup(2)
+                os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
+                try:
+                    llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
+                                n_gpu_layers=ngl if ngl >= 0 else 999, verbose=False)
+                finally:
+                    os.dup2(_fd, 2)
+                    os.close(_fd)
+            except (ValueError, RuntimeError):
+                print("  ⚠  GPU init failed, retrying CPU-only …", file=sys.stderr)
+                llm = Llama(model_path=str(path), n_ctx=sel.context_tokens,
+                            n_gpu_layers=0, verbose=False)
             raw = llamacpp_generate_fn(llm)
         except ImportError:
             print("  llama-cpp-python required for bench.", file=sys.stderr)

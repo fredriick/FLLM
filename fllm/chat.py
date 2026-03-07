@@ -13,7 +13,14 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
+try:
+    import termios
+    import tty
+    _HAS_TERMIOS = True
+except ImportError:
+    _HAS_TERMIOS = False
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -184,22 +191,59 @@ class InteractiveChat:
                 if pct > 80:
                     print(f"\n  ⚠  Context {pct:.0f}% full — consider /clear", file=sys.stderr)
 
-                # Generate
-                print("\nAssistant: ", end="", flush=True)
+                # Generate with spinner
                 t0 = time.time()
+                stop_spinner = threading.Event()
+
+                def _spinner():
+                    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+                    i = 0
+                    while not stop_spinner.is_set():
+                        elapsed = time.time() - t0
+                        print(f"\r  {frames[i % len(frames)]} Thinking… ({elapsed:.1f}s)", end="", flush=True)
+                        i += 1
+                        stop_spinner.wait(0.1)
+                    # Clear spinner line
+                    print(f"\r{' ' * 40}\r", end="", flush=True)
+
+                spinner_thread = threading.Thread(target=_spinner, daemon=True)
+                spinner_thread.start()
+
+                # Suppress keyboard input during generation
+                old_settings = None
+                input_suppressed = False
+                if _HAS_TERMIOS:
+                    try:
+                        old_settings = termios.tcgetattr(sys.stdin)
+                        tty.setcbreak(sys.stdin.fileno())
+                        input_suppressed = True
+                    except (termios.error, ValueError, OSError):
+                        pass
+
                 try:
                     reply = self.generate(prompt)
                 except Exception as e:
+                    stop_spinner.set()
+                    spinner_thread.join()
+                    if input_suppressed and old_settings:
+                        termios.tcsetattr(sys.stdin, termios.TCSAFLUSH, old_settings)
                     print(f"\n  ✗ Generation error: {e}", file=sys.stderr)
                     self.session.messages.pop()   # Remove the user message
                     continue
+
+                stop_spinner.set()
+                spinner_thread.join()
+
+                # Restore terminal and flush any buffered input
+                if input_suppressed:
+                    termios.tcsetattr(sys.stdin, termios.TCSAFLUSH, old_settings)
 
                 elapsed = time.time() - t0
                 # Estimate tokens per second (rough)
                 reply_tokens = len(reply) // 4
                 tps = reply_tokens / elapsed if elapsed > 0 else 0
 
-                print(reply)
+                print(f"Assistant: {reply}")
                 print(f"\n  [{reply_tokens}t  {tps:.1f} tok/s  {elapsed:.2f}s]", file=sys.stderr)
 
                 self.session.add("assistant", reply, tokens=reply_tokens)

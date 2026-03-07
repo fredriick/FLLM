@@ -188,7 +188,25 @@ class LlamaCppBackend:
             # llama-cpp-python ≥0.2.90 supports draft_model
             kwargs["draft_model"] = str(spec.draft_model_path)
 
-        llm = Llama(**kwargs)
+        try:
+            # Suppress noisy Metal/GPU shader errors on first attempt
+            _fd = os.dup(2)
+            os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
+            try:
+                llm = Llama(**kwargs)
+            finally:
+                os.dup2(_fd, 2)
+                os.close(_fd)
+        except (ValueError, RuntimeError):
+            # Metal backend may fail under Rosetta 2 or incompatible macOS
+            print("  ⚠  GPU init failed, retrying CPU-only …", file=sys.stderr)
+            kwargs["n_gpu_layers"] = 0
+            try:
+                llm = Llama(**kwargs)
+            except (ValueError, RuntimeError):
+                print("ERROR: Failed to load model. If on Apple Silicon under Rosetta 2,\n"
+                      "  try: pip install 'llama-cpp-python==0.2.90'", file=sys.stderr)
+                sys.exit(1)
 
         def _generate(prompt: str) -> str:
             out = llm(prompt, max_tokens=512, stop=["<|im_end|>", "<|eot_id|>",
