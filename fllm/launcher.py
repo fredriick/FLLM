@@ -108,6 +108,54 @@ class LLMRunner:
             "warnings": hw.warnings,
         }, indent=2))
 
+    def scan(self):
+        from .registry import list_families
+        from .selector import ModelSelector, _est, _BITS_TO_QUANT
+        hw = self.detect()
+        _print_hw(hw)
+        selector = ModelSelector(hw)
+        families = list_families()
+
+        fits = []
+        too_big = []
+        for fam in families:
+            try:
+                sel = selector.select(fam.key)
+                fits.append(sel)
+            except Exception:
+                too_big.append(fam)
+
+        if fits:
+            # Sort: largest model first
+            fits.sort(key=lambda s: s.estimated_size_gb, reverse=True)
+            best = fits[0]
+
+            print(f"\n  Recommended: {best.family.display} {best.size.label} "
+                  f"({best.quant_method})")
+            print(f"  Run: fllm run {best.family.key} --mode interactive\n")
+
+            print(f"  {'Model':<28} {'Size':<8} {'Quant':<10} {'Est.':<8} {'Context':<10} {'Fit'}")
+            print(f"  {'─'*28} {'─'*8} {'─'*10} {'─'*8} {'─'*10} {'─'*12}")
+            for sel in fits:
+                fit_str = "VRAM" if sel.fits_in_vram else ("offload" if sel.needs_cpu_offload else "RAM")
+                label = f"{sel.family.display} {sel.size.label}"
+                print(f"  {label:<28} {sel.size.label:<8} {sel.quant_method:<10} "
+                      f"{sel.estimated_size_gb:<7.1f}G {sel.context_tokens:<10,} {fit_str}")
+
+        if too_big:
+            print(f"\n  Cannot fit:")
+            for fam in too_big:
+                print(f"    {fam.display} — needs more memory")
+
+        # Show downloaded models that are ready to go
+        downloaded = self._list_downloaded()
+        if downloaded:
+            print(f"\n  Ready to run ({len(downloaded)} downloaded):")
+            for name, _, size in downloaded:
+                print(f"    {name} ({size:.1f} GB)")
+
+        print()
+
     def models(self):
         from .registry import list_families
         families = list_families()

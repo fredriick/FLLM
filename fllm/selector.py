@@ -96,17 +96,25 @@ class ModelSelector:
                     break
 
         if chosen is None:
-            # Last resort: use smallest model with heaviest quant
-            chosen = entry.sizes[0]
+            # Try smallest model with heaviest quant
+            smallest = entry.sizes[0]
             for fq, fb in [("Q3_K_M",3),("Q2_K",2)]:
-                model_size = _est(chosen.params_b, fb)
-                kv_cache = _est_kv_cache(chosen.params_b, 512)  # Reduce context heavily
+                model_size = _est(smallest.params_b, fb)
+                kv_cache = _est_kv_cache(smallest.params_b, 512)
                 total_needed = model_size + kv_cache
                 if total_needed <= budget:
+                    chosen = smallest
                     quant, bits = fq, fb
                     context = 512
+                    hw.warnings.append(f"Memory constrained — using {chosen.label} {quant} with {context} context.")
                     break
-            hw.warnings.append(f"Memory constrained — using {chosen.label} {quant} with {context} context.")
+            # If nothing fits at all, raise an error
+            if chosen is None:
+                raise ValueError(
+                    f"Model {entry.display} ({smallest.label}) requires at least "
+                    f"{_est(smallest.params_b, 2) + _est_kv_cache(smallest.params_b, 512):.1f}GB "
+                    f"but only {budget:.1f}GB available ({hw.tier} tier)"
+                )
 
         est = _est(chosen.params_b, bits)
         kv_overhead = _est_kv_cache(chosen.params_b, context)

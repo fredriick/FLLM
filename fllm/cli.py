@@ -76,6 +76,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── info ─────────────────────────────────────────────────────────────────
     sub.add_parser("info", help="Print hardware profile as JSON.")
 
+    # ── scan ─────────────────────────────────────────────────────────────────
+    sub.add_parser("scan", help="Scan hardware and recommend models that fit.")
+
     # ── models ───────────────────────────────────────────────────────────────
     mp = sub.add_parser("models", help="List supported and downloaded models.")
     mp.add_argument("--remove", metavar="FILENAME", default=None,
@@ -113,6 +116,12 @@ def cmd_info(args):
     from fllm.launcher import LLMRunner
     print(BANNER)
     LLMRunner(verbose=getattr(args, "verbose", False)).info()
+
+
+def cmd_scan(_args):
+    print(BANNER)
+    from fllm.launcher import LLMRunner
+    LLMRunner().scan()
 
 
 def cmd_models(args):
@@ -188,6 +197,7 @@ def main():
 
     dispatch = {
         "info":     cmd_info,
+        "scan":     cmd_scan,
         "models":   cmd_models,
         "sessions": cmd_sessions,
         "run":      cmd_run,
