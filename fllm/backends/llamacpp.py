@@ -234,6 +234,12 @@ class LlamaCppBackend:
             sys.exit(1)
 
         ngl = _gpu_layers(self.hw, self.sel)
+        
+        # Force CPU mode if FLLM_CPU_ONLY is set or Metal fails
+        if os.environ.get("FLLM_CPU_ONLY", "").lower() in ("1", "true", "yes"):
+            ngl = 0
+            print("  ℹ  FLLM_CPU_ONLY=1 forcing CPU mode", file=sys.stderr)
+        
         model_settings = ModelSettings(
             model=str(model_path),
             n_ctx=self.sel.context_tokens,
