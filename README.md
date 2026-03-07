@@ -18,18 +18,24 @@ fllm run qwen
 
 ```bash
 git clone https://github.com/fredriick/FLLM.git
-cd fllm
+cd FLLM
+python3 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -e .
+```
 
-# CPU only (works everywhere)
-pip install -e ".[cpu]"
+This installs everything needed for interactive chat and server mode (llama.cpp backend).
 
-# NVIDIA/AMD GPU
+**Optional extras** for specific hardware:
+
+```bash
+# NVIDIA/AMD GPU (adds vLLM)
 pip install -e ".[gpu]"
 
-# Apple Silicon
+# Apple Silicon (adds server dependencies)
 pip install -e ".[apple]"
 
-# AirLLM (low VRAM - run 70B on 4GB GPU)
+# AirLLM (low VRAM - run 70B on 4GB GPU, pulls in torch)
 pip install -e ".[air]"
 ```
 
@@ -195,6 +201,7 @@ fllm/
 ├── selector.py    Model size + quantization picker
 ├── downloader.py  HuggingFace GGUF fetcher with resume + progress
 ├── launcher.py    Orchestrator
+├── chat.py        Interactive chat session (history, templates, spinner)
 ├── backends/
 │   ├── llamacpp.py   Tier B + C, GPU offload
 │   ├── vllm.py       Tier A (NVIDIA)
