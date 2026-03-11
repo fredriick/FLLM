@@ -108,10 +108,10 @@ class LlamaCppBackend:
 
     # ── Server ────────────────────────────────────────────────────────────────
 
-    def launch_server(self, model_path: Path, port: int = 8080, spec: Optional[SpecConfig] = None):
+    def launch_server(self, model_path: Path, port: int = 8080, spec: Optional[SpecConfig] = None, web: bool = False):
         binary = _find(_SERVER_NAMES)
         if not binary:
-            return self._py_server(model_path, port)
+            return self._py_server(model_path, port, web=web)
 
         ngl     = _gpu_layers(self.hw, self.sel)
         threads = max(1, self.hw.cpu_physical_cores - 1)
@@ -135,6 +135,9 @@ class LlamaCppBackend:
                     "--draft", str(spec.n_draft_tokens)]
 
         _print_server_info(port, ngl, ctx, threads, spec)
+        if web:
+            print(f"  i  llama-server has a built-in web UI at http://127.0.0.1:{port}")
+            _open_browser(port)
         proc = subprocess.Popen(cmd)
 
         def _kill_server():
@@ -222,7 +225,7 @@ class LlamaCppBackend:
 
     # ── Python-bindings server fallback ───────────────────────────────────────
 
-    def _py_server(self, model_path: Path, port: int):
+    def _py_server(self, model_path: Path, port: int, web: bool = False):
         try:
             from llama_cpp.server.app import create_app
             from llama_cpp.server.settings import ModelSettings, ServerSettings, Settings
@@ -234,27 +237,65 @@ class LlamaCppBackend:
             sys.exit(1)
 
         ngl = _gpu_layers(self.hw, self.sel)
-        
+
         # Force CPU mode if FLLM_CPU_ONLY is set or Metal fails
         if os.environ.get("FLLM_CPU_ONLY", "").lower() in ("1", "true", "yes"):
             ngl = 0
             print("  ℹ  FLLM_CPU_ONLY=1 forcing CPU mode", file=sys.stderr)
-        
-        model_settings = ModelSettings(
-            model=str(model_path),
-            n_ctx=self.sel.context_tokens,
-            n_gpu_layers=999 if ngl < 0 else ngl,
-        )
+
         server_settings = ServerSettings(
             host="127.0.0.1",
             port=port,
         )
-        app = create_app(
-            model_settings=[model_settings],
-            server_settings=server_settings,
-        )
-        print(f"\n  ▶  llama-cpp-python server  →  http://127.0.0.1:{port}/v1")
+
+        try:
+            model_settings = ModelSettings(
+                model=str(model_path),
+                n_ctx=self.sel.context_tokens,
+                n_gpu_layers=999 if ngl < 0 else ngl,
+            )
+            app = create_app(
+                model_settings=[model_settings],
+                server_settings=server_settings,
+            )
+        except (ValueError, RuntimeError):
+            if ngl == 0:
+                raise
+            print("  ⚠  GPU init failed, retrying CPU-only …", file=sys.stderr)
+            model_settings = ModelSettings(
+                model=str(model_path),
+                n_ctx=self.sel.context_tokens,
+                n_gpu_layers=0,
+            )
+            app = create_app(
+                model_settings=[model_settings],
+                server_settings=server_settings,
+            )
+
+        model_label = f"{self.sel.family.display} {self.sel.size.label} {self.sel.quant_method}"
+        if web:
+            from ..webui import mount_webui
+            mount_webui(app, model_label)
+            print(f"\n  ▶  llama-cpp-python server  →  http://127.0.0.1:{port}/v1")
+            print(f"  ▶  Web UI                   →  http://127.0.0.1:{port}")
+            _open_browser(port)
+        else:
+            print(f"\n  ▶  llama-cpp-python server  →  http://127.0.0.1:{port}/v1")
+
         uvicorn.run(app, host="127.0.0.1", port=port)
+
+
+def _open_browser(port: int, delay: float = 1.5):
+    """Open the browser after a short delay to let the server start."""
+    import threading
+    import webbrowser
+
+    def _go():
+        import time
+        time.sleep(delay)
+        webbrowser.open(f"http://127.0.0.1:{port}")
+
+    threading.Thread(target=_go, daemon=True).start()
 
 
 def _print_server_info(port, ngl, ctx, threads, spec):

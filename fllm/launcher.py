@@ -54,7 +54,7 @@ class LLMRunner:
         return ModelDownloader(self.cache_dir).ensure(self._sel)
 
     def run(self, family, mode="server", port=8080, model_path=None,
-            system_prompt=None, no_spec=False):
+            system_prompt=None, no_spec=False, web=False):
         hw = self.detect()
         _print_hw(hw)
         sel = self.select_model(family)
@@ -73,6 +73,10 @@ class LLMRunner:
                 if not spec.enabled:
                     print(f"  i  Spec decode off: {spec.reason_disabled}")
 
+        if web and mode != "server":
+            print(f"  i  --web requires server mode, switching from '{mode}' to 'server'")
+            mode = "server"
+
         backend = self._build_backend(hw, sel)
         print(f"\n  Backend: {backend.name}")
 
@@ -83,7 +87,7 @@ class LLMRunner:
         if mode == "bench":
             self._run_bench(sel, path, backend)
         elif mode == "server":
-            backend.launch_server(path, port=port)
+            backend.launch_server(path, port=port, web=web)
         else:
             self._run_interactive(sel, path, backend,
                                   system_prompt or sel.family.default_system)

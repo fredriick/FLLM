@@ -98,6 +98,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="API server port (default: 8080).")
     rp.add_argument("--system", default=None, dest="system_prompt",
                     help="Custom system prompt for interactive mode.")
+    rp.add_argument("--web", action="store_true",
+                    help="Launch browser-based chat UI.")
     rp.add_argument("--bench-output", type=Path, default=None,
                     help="Save benchmark JSON to this path.")
 
@@ -171,6 +173,7 @@ def cmd_run(args):
         model_path=args.model_path,
         system_prompt=getattr(args, "system_prompt", None),
         no_spec=args.no_spec,
+        web=getattr(args, "web", False),
     )
 
 
