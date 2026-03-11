@@ -92,6 +92,44 @@ class LLMRunner:
             self._run_interactive(sel, path, backend,
                                   system_prompt or sel.family.default_system)
 
+    def serve(self, family, port=8080, model_path=None, web=False):
+        """Launch OpenAI-compatible API server (drop-in replacement)."""
+        hw = self.detect()
+        _print_hw(hw)
+        sel = self.select_model(family)
+        _print_model(sel)
+        path = model_path or self.download()
+
+        from .openai_api import create_openai_app
+        import uvicorn
+
+        model_label = f"{sel.family.display} {sel.size.label} {sel.quant_method}"
+        app = create_openai_app(
+            model_path=path,
+            hw=hw,
+            sel=sel,
+            model_label=model_label,
+            web=web,
+        )
+
+        print(f"\n  ▶  OpenAI-compatible API  →  http://127.0.0.1:{port}/v1")
+        print(f"     Endpoints:")
+        print(f"       POST /v1/chat/completions   (streaming + non-streaming)")
+        print(f"       POST /v1/completions        (legacy text completions)")
+        print(f"       GET  /v1/models             (list models)")
+        print(f"       POST /v1/embeddings         (if supported)")
+        print(f"\n     Usage with OpenAI SDK:")
+        print(f'       client = OpenAI(base_url="http://127.0.0.1:{port}/v1", api_key="fllm")')
+        print(f'       client.chat.completions.create(model="{sel.family.key}", messages=[...])')
+
+        if web:
+            print(f"\n  ▶  Web UI  →  http://127.0.0.1:{port}")
+            from .backends.llamacpp import _open_browser
+            _open_browser(port)
+
+        print(f"\n{'─'*55}\n")
+        uvicorn.run(app, host="127.0.0.1", port=port)
+
     def info(self):
         hw = self.detect()
         print(json.dumps({

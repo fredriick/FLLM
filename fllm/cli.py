@@ -103,6 +103,14 @@ def _build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--bench-output", type=Path, default=None,
                     help="Save benchmark JSON to this path.")
 
+    # ── serve (OpenAI-compatible API) ────────────────────────────────────────
+    svp = sub.add_parser("serve", help="OpenAI-compatible API server (drop-in replacement).")
+    _run_args(svp)
+    svp.add_argument("--port", type=int, default=8080,
+                     help="API server port (default: 8080).")
+    svp.add_argument("--web", action="store_true",
+                     help="Include browser-based chat UI.")
+
     # ── bench ─────────────────────────────────────────────────────────────────
     bp = sub.add_parser("bench", help="Benchmark token throughput for a model.")
     _run_args(bp)
@@ -177,6 +185,26 @@ def cmd_run(args):
     )
 
 
+def cmd_serve(args):
+    from fllm.launcher import LLMRunner
+    print(BANNER)
+    runner = LLMRunner(
+        cache_dir=args.cache_dir,
+        verbose=args.verbose,
+        force_tier=args.tier,
+        force_backend=args.backend,
+        use_speculative=not args.no_spec,
+        compression=args.compression,
+        context=getattr(args, "context", None),
+    )
+    runner.serve(
+        family=args.family,
+        port=getattr(args, "port", 8080),
+        model_path=args.model_path,
+        web=getattr(args, "web", False),
+    )
+
+
 def cmd_bench(args):
     from fllm.launcher import LLMRunner
     print(BANNER)
@@ -204,6 +232,7 @@ def main():
         "models":   cmd_models,
         "sessions": cmd_sessions,
         "run":      cmd_run,
+        "serve":    cmd_serve,
         "bench":    cmd_bench,
     }
 

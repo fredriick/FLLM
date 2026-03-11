@@ -4,7 +4,7 @@
 
 - [x] **Web UI** - Browser-based chat interface (`fllm run <model> --web`)
 - [x] **fllm scan** - Detect hardware and recommend models (DONE)
-- [ ] **OpenAI API compatibility** - Drop-in replacement for OpenAI SDK
+- [x] **OpenAI API compatibility** - Drop-in replacement for OpenAI SDK (`fllm serve <model>`)
 - [ ] **Multi-model routing** - Run different models for different tasks
 - [ ] **Model conversion** - Convert HuggingFace models to GGUF directly
 - [ ] **Prompt templates** - Library of system prompts for different use cases
@@ -23,8 +23,8 @@
 
 - [x] **/v1/chat/completions** - OpenAI-compatible chat endpoint (via llama-cpp-python)
 - [x] **Streaming support** - Server-Sent Events for streaming tokens
-- [ ] **/v1/models endpoint** - List available models explicitly
-- [ ] **API key bypass** - Allow local usage without API key
+- [x] **/v1/models endpoint** - List available models explicitly
+- [x] **API key bypass** - Allow local usage without API key
 - [ ] **Alt-provider compatible format - Support additional native API formats
 - [ ] **MCP server** - Model Context Protocol server implementation
 
