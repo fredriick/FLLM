@@ -45,8 +45,9 @@ class ModelSelector:
     def select(self, family_hint: str) -> ModelSelection:
         entry = resolve(family_hint)
         if entry is None:
-            known = ", ".join(f.key for f in list_families())
-            raise ValueError(f"Unknown model family '{family_hint}'. Known: {known}")
+            from .errors import ModelNotFoundError
+            available = [f.key for f in list_families()]
+            raise ModelNotFoundError(family_hint, available)
         return self._pick(entry)
 
     def _pick(self, entry: FamilyEntry) -> ModelSelection:
@@ -110,11 +111,9 @@ class ModelSelector:
                     break
             # If nothing fits at all, raise an error
             if chosen is None:
-                raise ValueError(
-                    f"Model {entry.display} ({smallest.label}) requires at least "
-                    f"{_est(smallest.params_b, 2) + _est_kv_cache(smallest.params_b, 512):.1f}GB "
-                    f"but only {budget:.1f}GB available ({hw.tier} tier)"
-                )
+                from .errors import ModelTooLargeError
+                required = _est(smallest.params_b, 2) + _est_kv_cache(smallest.params_b, 512)
+                raise ModelTooLargeError(entry.key, required, budget)
 
         est = _est(chosen.params_b, bits)
         kv_overhead = _est_kv_cache(chosen.params_b, context)

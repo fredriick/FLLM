@@ -420,7 +420,10 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    fn(args)
+    from fllm.errors import cli_error_handler
+    verbose = getattr(args, "verbose", False)
+    exit_code = cli_error_handler(lambda: fn(args), verbose=verbose)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

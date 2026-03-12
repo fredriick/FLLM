@@ -81,8 +81,8 @@ class LLMRunner:
         print(f"\n  Backend: {backend.name}")
 
         if not backend.is_available():
-            print(f"\n  Backend not installed.\n  {backend.install_hint()}")
-            sys.exit(1)
+            from .errors import BackendNotAvailableError
+            raise BackendNotAvailableError(backend.name, backend.install_hint())
 
         if mode == "bench":
             self._run_bench(sel, path, backend)

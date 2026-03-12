@@ -94,9 +94,14 @@ class ModelDownloader:
             return Path(local)
 
         except GatedRepoError:
-            self._handle_gated_model(sel.gguf_repo)
+            from .errors import AuthenticationError
+            raise AuthenticationError(sel.gguf_repo)
         except RepositoryNotFoundError:
-            self._handle_missing_model(sel.gguf_repo)
+            from .errors import DownloadError
+            raise DownloadError(
+                f"Repository not found: {sel.gguf_repo}",
+                repo=sel.gguf_repo,
+            )
 
     def _handle_gated_model(self, repo: str):
         """Handle gated models that require HF login."""
