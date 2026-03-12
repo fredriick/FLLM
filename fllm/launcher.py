@@ -118,9 +118,14 @@ class LLMRunner:
         print(f"       POST /v1/completions        (legacy text completions)")
         print(f"       GET  /v1/models             (list models)")
         print(f"       POST /v1/embeddings         (if supported)")
+        print(f"       GET  /v1/metrics            (usage metrics)")
+        print(f"       GET  /v1/metrics/recent     (recent requests)")
         print(f"\n     Usage with OpenAI SDK:")
         print(f'       client = OpenAI(base_url="http://127.0.0.1:{port}/v1", api_key="fllm")')
         print(f'       client.chat.completions.create(model="{sel.family.key}", messages=[...])')
+        print(f"\n     View metrics:")
+        print(f"       fllm metrics --live http://127.0.0.1:{port}")
+        print(f"       fllm metrics --live http://127.0.0.1:{port} --recent 10")
 
         if web:
             print(f"\n  ▶  Web UI  →  http://127.0.0.1:{port}")

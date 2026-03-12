@@ -111,6 +111,15 @@ def _build_parser() -> argparse.ArgumentParser:
     svp.add_argument("--web", action="store_true",
                      help="Include browser-based chat UI.")
 
+    # ── metrics ───────────────────────────────────────────────────────────────
+    metp = sub.add_parser("metrics", help="View usage metrics for a running or past server.")
+    metp.add_argument("--model", default=None,
+                      help="Model key to view metrics for (default: show all).")
+    metp.add_argument("--live", default=None, metavar="URL",
+                      help="Fetch live metrics from a running server (e.g. http://127.0.0.1:8080).")
+    metp.add_argument("--recent", type=int, default=0, metavar="N",
+                      help="Show last N requests.")
+
     # ── bench ─────────────────────────────────────────────────────────────────
     bp = sub.add_parser("bench", help="Benchmark token throughput for a model.")
     _run_args(bp)
@@ -205,6 +214,77 @@ def cmd_serve(args):
     )
 
 
+def cmd_metrics(args):
+    print(BANNER)
+    from fllm.metrics import (
+        MetricsTracker, MetricsSummary, print_summary, print_recent_requests,
+    )
+
+    live_url = getattr(args, "live", None)
+    model_key = getattr(args, "model", None)
+    recent_n = getattr(args, "recent", 0)
+
+    # Live mode — fetch from running server
+    if live_url:
+        import urllib.request
+        import json
+
+        try:
+            url = f"{live_url.rstrip('/')}/v1/metrics"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = json.loads(resp.read())
+            summary = MetricsSummary(**data)
+            print_summary(summary)
+        except Exception as e:
+            print(f"\n  Failed to fetch metrics from {live_url}: {e}\n")
+            return
+
+        if recent_n > 0:
+            try:
+                url = f"{live_url.rstrip('/')}/v1/metrics/recent?n={recent_n}"
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    data = json.loads(resp.read())
+                print_recent_requests(data.get("requests", []), recent_n)
+            except Exception as e:
+                print(f"  Failed to fetch recent requests: {e}\n")
+        return
+
+    # Offline mode — read from disk
+    metrics_base = Path.home() / ".cache" / "fllm" / "metrics"
+
+    if not metrics_base.exists():
+        print("\n  No metrics data found.")
+        print("  Start a server with 'fllm serve <model>' to begin tracking.\n")
+        return
+
+    if model_key:
+        model_dir = metrics_base / model_key
+        data = MetricsTracker.load_summary(model_dir)
+        if data:
+            summary = MetricsSummary(**data)
+            print_summary(summary)
+        else:
+            print(f"\n  No metrics found for model '{model_key}'.\n")
+
+        if recent_n > 0:
+            requests = MetricsTracker.load_request_log(model_dir, recent_n)
+            print_recent_requests(requests, recent_n)
+    else:
+        # Show all models
+        found = False
+        for model_dir in sorted(metrics_base.iterdir()):
+            if model_dir.is_dir():
+                data = MetricsTracker.load_summary(model_dir)
+                if data:
+                    found = True
+                    summary = MetricsSummary(**data)
+                    print_summary(summary)
+
+        if not found:
+            print("\n  No metrics data found.")
+            print("  Start a server with 'fllm serve <model>' to begin tracking.\n")
+
+
 def cmd_bench(args):
     from fllm.launcher import LLMRunner
     print(BANNER)
@@ -233,6 +313,7 @@ def main():
         "sessions": cmd_sessions,
         "run":      cmd_run,
         "serve":    cmd_serve,
+        "metrics":  cmd_metrics,
         "bench":    cmd_bench,
     }
 

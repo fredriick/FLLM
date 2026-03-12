@@ -11,7 +11,7 @@
 - [x] **Streaming responses** - Real-time token streaming in CLI (via llama-cpp-python)
 - [ ] **Docker support** - Containerized deployment
 - [ ] **Remote inference** - Connect to remote FLLM servers
-- [ ] **Usage metrics** - Track tokens/sec, latency, cost
+- [x] **Usage metrics** - Track tokens/sec, latency, cost (`fllm metrics`)
 - [ ] **Model comparison** - Benchmark multiple models side-by-side
 - [ ] **Continuous batching** - vLLM-style high-throughput serving
 - [ ] **Plugin system** - Custom backends or preprocessing

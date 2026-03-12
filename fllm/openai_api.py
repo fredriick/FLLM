@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 
 from .scout import HardwareProfile
 from .selector import ModelSelection
+from .metrics import MetricsTracker
 
 
 def _generate_id(prefix: str = "chatcmpl") -> str:
@@ -112,6 +113,13 @@ def create_openai_app(
     model_id = sel.family.key
     created_at = _timestamp()
 
+    # ── Metrics tracker ───────────────────────────────────────────────────
+    metrics_dir = Path.home() / ".cache" / "fllm" / "metrics" / model_id
+    tracker = MetricsTracker(
+        model_label=model_label,
+        persist_dir=metrics_dir,
+    )
+
     # ── GET /v1/models ────────────────────────────────────────────────────
 
     @app.get("/v1/models")
@@ -174,7 +182,7 @@ def create_openai_app(
 
         if stream:
             return StreamingResponse(
-                _stream_chat(llm, kwargs, user_model),
+                _stream_chat(llm, kwargs, user_model, tracker),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -183,11 +191,20 @@ def create_openai_app(
                 },
             )
 
-        # Non-streaming
-        try:
-            result = llm.create_chat_completion(**kwargs)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        # Non-streaming — track metrics
+        with tracker.track_request() as req:
+            try:
+                result = llm.create_chat_completion(**kwargs)
+            except Exception as e:
+                req.record(success=False, error=str(e))
+                raise HTTPException(status_code=500, detail=str(e))
+
+            usage = result.get("usage", {})
+            req.record(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                stream=False,
+            )
 
         # Ensure proper OpenAI format
         completion_id = _generate_id()
@@ -238,7 +255,7 @@ def create_openai_app(
 
         if stream:
             return StreamingResponse(
-                _stream_completion(llm, kwargs, user_model),
+                _stream_completion(llm, kwargs, user_model, tracker),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -246,10 +263,20 @@ def create_openai_app(
                 },
             )
 
-        try:
-            result = llm.create_completion(**kwargs)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        # Non-streaming — track metrics
+        with tracker.track_request() as req:
+            try:
+                result = llm.create_completion(**kwargs)
+            except Exception as e:
+                req.record(success=False, error=str(e))
+                raise HTTPException(status_code=500, detail=str(e))
+
+            usage = result.get("usage", {})
+            req.record(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                stream=False,
+            )
 
         completion_id = _generate_id("cmpl")
         return {
@@ -312,11 +339,41 @@ def create_openai_app(
                 detail=f"Embeddings not supported by this model: {e}",
             )
 
+    # ── Metrics endpoints ─────────────────────────────────────────────────
+
+    @app.get("/v1/metrics")
+    async def get_metrics():
+        """Return aggregate usage metrics."""
+        return tracker.summary_dict()
+
+    @app.get("/v1/metrics/recent")
+    async def get_recent_metrics(n: int = 10):
+        """Return the last N request metrics."""
+        return {"requests": tracker.recent(n)}
+
+    @app.post("/v1/metrics/reset")
+    async def reset_metrics():
+        """Reset all metrics counters."""
+        tracker.reset()
+        return {"status": "ok", "message": "Metrics reset"}
+
+    @app.post("/v1/metrics/save")
+    async def save_metrics():
+        """Persist current metrics to disk."""
+        tracker.persist()
+        return {"status": "ok", "path": str(metrics_dir)}
+
     # ── Health ────────────────────────────────────────────────────────────
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "model": model_label}
+        summary = tracker.summary_dict()
+        return {
+            "status": "ok",
+            "model": model_label,
+            "total_requests": summary["total_requests"],
+            "uptime_seconds": summary["uptime_seconds"],
+        }
 
     # ── API key bypass middleware ──────────────────────────────────────────
     # Accept any API key (or none) — local usage doesn't need auth
@@ -337,68 +394,113 @@ def create_openai_app(
 
 # ── Streaming helpers ─────────────────────────────────────────────────────
 
-async def _stream_chat(llm, kwargs, model_name: str):
-    """Yield SSE chunks for chat completions."""
+async def _stream_chat(llm, kwargs, model_name: str, tracker: MetricsTracker):
+    """Yield SSE chunks for chat completions, with metrics tracking."""
     completion_id = _generate_id()
     created = _timestamp()
+    completion_tokens = 0
 
-    try:
-        stream = llm.create_chat_completion(**kwargs)
-        for chunk in stream:
-            delta = chunk.get("choices", [{}])[0].get("delta", {})
-            finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
+    with tracker.track_request() as req:
+        try:
+            stream = llm.create_chat_completion(**kwargs)
+            first_token = True
+            for chunk in stream:
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
 
-            sse_data = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": delta,
-                        "finish_reason": finish_reason,
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(sse_data)}\n\n"
+                if first_token and delta.get("content"):
+                    req.record_first_token()
+                    first_token = False
 
-        yield "data: [DONE]\n\n"
-    except Exception as e:
-        error_data = {"error": {"message": str(e), "type": "server_error"}}
-        yield f"data: {json.dumps(error_data)}\n\n"
-        yield "data: [DONE]\n\n"
+                if delta.get("content"):
+                    # Rough token estimate: ~4 chars per token
+                    completion_tokens += max(1, len(delta["content"]) // 4)
+
+                sse_data = {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(sse_data)}\n\n"
+
+            # Estimate prompt tokens from messages
+            prompt_text = " ".join(
+                m.get("content", "") for m in kwargs.get("messages", [])
+            )
+            prompt_tokens = max(1, len(prompt_text) // 4)
+
+            req.record(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=max(1, completion_tokens),
+                stream=True,
+            )
+
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            req.record(success=False, error=str(e), stream=True)
+            error_data = {"error": {"message": str(e), "type": "server_error"}}
+            yield f"data: {json.dumps(error_data)}\n\n"
+            yield "data: [DONE]\n\n"
 
 
-async def _stream_completion(llm, kwargs, model_name: str):
-    """Yield SSE chunks for legacy completions."""
+async def _stream_completion(llm, kwargs, model_name: str, tracker: MetricsTracker):
+    """Yield SSE chunks for legacy completions, with metrics tracking."""
     completion_id = _generate_id("cmpl")
     created = _timestamp()
+    completion_tokens = 0
 
-    try:
-        stream = llm.create_completion(**kwargs)
-        for chunk in stream:
-            text = chunk.get("choices", [{}])[0].get("text", "")
-            finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
+    with tracker.track_request() as req:
+        try:
+            stream = llm.create_completion(**kwargs)
+            first_token = True
+            for chunk in stream:
+                text = chunk.get("choices", [{}])[0].get("text", "")
+                finish_reason = chunk.get("choices", [{}])[0].get("finish_reason")
 
-            sse_data = {
-                "id": completion_id,
-                "object": "text_completion",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "text": text,
-                        "finish_reason": finish_reason,
-                        "logprobs": None,
-                    }
-                ],
-            }
-            yield f"data: {json.dumps(sse_data)}\n\n"
+                if first_token and text:
+                    req.record_first_token()
+                    first_token = False
 
-        yield "data: [DONE]\n\n"
-    except Exception as e:
-        error_data = {"error": {"message": str(e), "type": "server_error"}}
-        yield f"data: {json.dumps(error_data)}\n\n"
-        yield "data: [DONE]\n\n"
+                if text:
+                    completion_tokens += max(1, len(text) // 4)
+
+                sse_data = {
+                    "id": completion_id,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "text": text,
+                            "finish_reason": finish_reason,
+                            "logprobs": None,
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(sse_data)}\n\n"
+
+            # Estimate prompt tokens
+            prompt = kwargs.get("prompt", "")
+            prompt_tokens = max(1, len(prompt) // 4)
+
+            req.record(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=max(1, completion_tokens),
+                stream=True,
+            )
+
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            req.record(success=False, error=str(e), stream=True)
+            error_data = {"error": {"message": str(e), "type": "server_error"}}
+            yield f"data: {json.dumps(error_data)}\n\n"
+            yield "data: [DONE]\n\n"
