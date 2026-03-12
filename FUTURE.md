@@ -7,7 +7,7 @@
 - [x] **OpenAI API compatibility** - Drop-in replacement for OpenAI SDK (`fllm serve <model>`)
 - [ ] **Multi-model routing** - Run different models for different tasks
 - [ ] **Model conversion** - Convert HuggingFace models to GGUF directly
-- [ ] **Prompt templates** - Library of system prompts for different use cases
+- [x] **Prompt templates** - Library of system prompts for different use cases (`fllm templates`)
 - [x] **Streaming responses** - Real-time token streaming in CLI (via llama-cpp-python)
 - [ ] **Docker support** - Containerized deployment
 - [ ] **Remote inference** - Connect to remote FLLM servers

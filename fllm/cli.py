@@ -88,6 +88,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("sessions", help="List saved chat sessions.")
     sp.add_argument("--cache-dir", type=Path, default=None)
 
+    # ── templates ─────────────────────────────────────────────────────────────
+    tp = sub.add_parser("templates", help="List or view prompt templates.")
+    tp.add_argument("action", nargs="?", choices=["list", "show"],
+                    default="list", help="list = show all, show = display one template.")
+    tp.add_argument("name", nargs="?", default=None,
+                    help="Template name (for 'show' action).")
+
     # ── config ────────────────────────────────────────────────────────────────
     cp = sub.add_parser("config", help="View or initialize config file (~/.fllm/config.yaml).")
     cp.add_argument("action", nargs="?", choices=["init", "show", "path"],
@@ -104,6 +111,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="API server port (default: 8080).")
     rp.add_argument("--system", default=None, dest="system_prompt",
                     help="Custom system prompt for interactive mode.")
+    rp.add_argument("--template", default=None,
+                    help="Use a named prompt template (e.g. coding, creative, math).")
     rp.add_argument("--web", action="store_true",
                     help="Launch browser-based chat UI.")
     rp.add_argument("--bench-output", type=Path, default=None,
@@ -177,6 +186,21 @@ def cmd_sessions(args):
     print(f"\n  Load in interactive mode with:  /load <name>\n")
 
 
+def cmd_templates(args):
+    print(BANNER)
+    from fllm.templates import print_templates, print_template_detail
+
+    action = getattr(args, "action", "list")
+    name = getattr(args, "name", None)
+
+    if action == "show" and name:
+        print_template_detail(name)
+    elif action == "show" and not name:
+        print("\n  Usage: fllm templates show <name>\n")
+    else:
+        print_templates()
+
+
 def cmd_config(args):
     print(BANNER)
     from fllm.config import load_config, init_config, print_config, config_path
@@ -211,12 +235,21 @@ def cmd_run(args):
         compression=args.compression,
         context=getattr(args, "context", None),
     )
+    # Resolve system prompt: --system > --template > model default
+    system_prompt = getattr(args, "system_prompt", None)
+    template_name = getattr(args, "template", None)
+    if not system_prompt and template_name:
+        from fllm.templates import get_template
+        system_prompt = get_template(template_name)
+        if system_prompt:
+            print(f"  Using template: {template_name}\n")
+
     runner.run(
         family=args.family,
         mode=args.mode,
         port=getattr(args, "port", 8080),
         model_path=args.model_path,
-        system_prompt=getattr(args, "system_prompt", None),
+        system_prompt=system_prompt,
         no_spec=args.no_spec,
         web=getattr(args, "web", False),
     )
@@ -343,8 +376,9 @@ def main():
         "info":     cmd_info,
         "scan":     cmd_scan,
         "models":   cmd_models,
-        "sessions": cmd_sessions,
-        "config":   cmd_config,
+        "sessions":   cmd_sessions,
+        "templates":  cmd_templates,
+        "config":     cmd_config,
         "run":      cmd_run,
         "serve":    cmd_serve,
         "metrics":  cmd_metrics,
