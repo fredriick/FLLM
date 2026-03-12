@@ -255,6 +255,18 @@ class LLMRunner:
             for dname, _, size in downloaded:
                 print(f"    {dname} ({size:.1f} GB)")
 
+    def compare(self, families, output=None):
+        """Benchmark multiple models side-by-side."""
+        hw = self.detect()
+        _print_hw(hw)
+
+        from .compare import run_comparison
+        run_comparison(
+            families=families,
+            runner=self,
+            output_path=output,
+        )
+
     def bench(self, family, model_path=None, output=None):
         hw = self.detect()
         _print_hw(hw)

@@ -135,6 +135,18 @@ def _build_parser() -> argparse.ArgumentParser:
     metp.add_argument("--recent", type=int, default=0, metavar="N",
                       help="Show last N requests.")
 
+    # ── compare ────────────────────────────────────────────────────────────────
+    cmp = sub.add_parser("compare", help="Benchmark multiple models side-by-side.")
+    cmp.add_argument("families", nargs="+",
+                     help="Model families to compare (e.g. qwen llama3 phi4).")
+    cmp.add_argument("--tier", choices=["A", "B", "C"], default=None)
+    cmp.add_argument("--backend", choices=["llama.cpp", "vllm", "mlx", "airllm"], default=None)
+    cmp.add_argument("--context", type=int, default=None)
+    cmp.add_argument("--cache-dir", type=Path, default=None)
+    cmp.add_argument("--verbose", action="store_true")
+    cmp.add_argument("--output", type=Path, default=None,
+                     help="Save comparison results to JSON file.")
+
     # ── bench ─────────────────────────────────────────────────────────────────
     bp = sub.add_parser("bench", help="Benchmark token throughput for a model.")
     _run_args(bp)
@@ -351,6 +363,22 @@ def cmd_metrics(args):
             print("  Start a server with 'fllm serve <model>' to begin tracking.\n")
 
 
+def cmd_compare(args):
+    from fllm.launcher import LLMRunner
+    print(BANNER)
+    runner = LLMRunner(
+        cache_dir=getattr(args, "cache_dir", None),
+        verbose=getattr(args, "verbose", False),
+        force_tier=getattr(args, "tier", None),
+        force_backend=getattr(args, "backend", None),
+        context=getattr(args, "context", None),
+    )
+    runner.compare(
+        families=args.families,
+        output=getattr(args, "output", None),
+    )
+
+
 def cmd_bench(args):
     from fllm.launcher import LLMRunner
     print(BANNER)
@@ -382,6 +410,7 @@ def main():
         "run":      cmd_run,
         "serve":    cmd_serve,
         "metrics":  cmd_metrics,
+        "compare":  cmd_compare,
         "bench":    cmd_bench,
     }
 

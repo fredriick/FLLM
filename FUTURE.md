@@ -12,7 +12,7 @@
 - [ ] **Docker support** - Containerized deployment
 - [ ] **Remote inference** - Connect to remote FLLM servers
 - [x] **Usage metrics** - Track tokens/sec, latency, cost (`fllm metrics`)
-- [ ] **Model comparison** - Benchmark multiple models side-by-side
+- [x] **Model comparison** - Benchmark multiple models side-by-side (`fllm compare`)
 - [ ] **Continuous batching** - vLLM-style high-throughput serving
 - [ ] **Plugin system** - Custom backends or preprocessing
 - [ ] **TTS/STT integration** - Voice input/output
