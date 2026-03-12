@@ -88,6 +88,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("sessions", help="List saved chat sessions.")
     sp.add_argument("--cache-dir", type=Path, default=None)
 
+    # ── config ────────────────────────────────────────────────────────────────
+    cp = sub.add_parser("config", help="View or initialize config file (~/.fllm/config.yaml).")
+    cp.add_argument("action", nargs="?", choices=["init", "show", "path"],
+                    default="show",
+                    help="init = create default config, show = display current, path = print path.")
+
     # ── run ──────────────────────────────────────────────────────────────────
     rp = sub.add_parser("run", help="Download and launch a model.")
     _run_args(rp)
@@ -171,9 +177,31 @@ def cmd_sessions(args):
     print(f"\n  Load in interactive mode with:  /load <name>\n")
 
 
+def cmd_config(args):
+    print(BANNER)
+    from fllm.config import load_config, init_config, print_config, config_path
+
+    action = getattr(args, "action", "show")
+
+    if action == "init":
+        p = init_config()
+        print(f"\n  Config created at: {p}\n")
+        print_config(load_config())
+    elif action == "path":
+        print(f"\n  {config_path()}\n")
+    else:
+        config = load_config()
+        print_config(config)
+
+
 def cmd_run(args):
     from fllm.launcher import LLMRunner
+    from fllm.config import load_config, apply_config_defaults
     print(BANNER)
+
+    config = load_config()
+    args = apply_config_defaults(args, config, model_key=args.family)
+
     runner = LLMRunner(
         cache_dir=args.cache_dir,
         verbose=args.verbose,
@@ -196,7 +224,12 @@ def cmd_run(args):
 
 def cmd_serve(args):
     from fllm.launcher import LLMRunner
+    from fllm.config import load_config, apply_config_defaults
     print(BANNER)
+
+    config = load_config()
+    args = apply_config_defaults(args, config, model_key=args.family)
+
     runner = LLMRunner(
         cache_dir=args.cache_dir,
         verbose=args.verbose,
@@ -311,6 +344,7 @@ def main():
         "scan":     cmd_scan,
         "models":   cmd_models,
         "sessions": cmd_sessions,
+        "config":   cmd_config,
         "run":      cmd_run,
         "serve":    cmd_serve,
         "metrics":  cmd_metrics,

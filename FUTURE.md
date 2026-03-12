@@ -17,7 +17,7 @@
 - [ ] **Plugin system** - Custom backends or preprocessing
 - [ ] **TTS/STT integration** - Voice input/output
 - [ ] **RAG support** - Built-in document retrieval
-- [ ] **Config files** - `~/.fllm/config.yaml` for defaults
+- [x] **Config files** - `~/.fllm/config.yaml` for defaults (`fllm config`)
 
 ## Coding CLI Support (AI coding tools)
 
