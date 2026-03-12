@@ -10,7 +10,7 @@
 - [x] **Prompt templates** - Library of system prompts for different use cases (`fllm templates`)
 - [x] **Streaming responses** - Real-time token streaming in CLI (via llama-cpp-python)
 - [ ] **Docker support** - Containerized deployment
-- [ ] **Remote inference** - Connect to remote FLLM servers
+- [x] **Remote inference** - Connect to remote FLLM servers (`fllm remote`)
 - [x] **Usage metrics** - Track tokens/sec, latency, cost (`fllm metrics`)
 - [x] **Model comparison** - Benchmark multiple models side-by-side (`fllm compare`)
 - [ ] **Continuous batching** - vLLM-style high-throughput serving

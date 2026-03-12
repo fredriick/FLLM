@@ -135,6 +135,26 @@ def _build_parser() -> argparse.ArgumentParser:
     metp.add_argument("--recent", type=int, default=0, metavar="N",
                       help="Show last N requests.")
 
+    # ── remote ─────────────────────────────────────────────────────────────────
+    rmp = sub.add_parser("remote", help="Connect to a remote FLLM server for inference.")
+    rmp.add_argument("url", help="Server URL (e.g. http://192.168.1.100:8080).")
+    rmp.add_argument("--ask", default=None, metavar="PROMPT",
+                     help="One-shot query instead of interactive chat.")
+    rmp.add_argument("--stream", action="store_true", default=True,
+                     help="Enable streaming (default: on).")
+    rmp.add_argument("--no-stream", action="store_true",
+                     help="Disable streaming.")
+    rmp.add_argument("--system", default=None, dest="system_prompt",
+                     help="System prompt for the chat.")
+    rmp.add_argument("--template", default=None,
+                     help="Use a named prompt template.")
+    rmp.add_argument("--model", default=None,
+                     help="Override model name sent to server.")
+    rmp.add_argument("--api-key", default="fllm",
+                     help="API key (default: fllm).")
+    rmp.add_argument("--timeout", type=int, default=120,
+                     help="Request timeout in seconds (default: 120).")
+
     # ── compare ────────────────────────────────────────────────────────────────
     cmp = sub.add_parser("compare", help="Benchmark multiple models side-by-side.")
     cmp.add_argument("families", nargs="+",
@@ -363,6 +383,41 @@ def cmd_metrics(args):
             print("  Start a server with 'fllm serve <model>' to begin tracking.\n")
 
 
+def cmd_remote(args):
+    from fllm.remote import RemoteClient, run_remote_chat, run_remote_query
+    print(BANNER)
+
+    # Resolve system prompt
+    system_prompt = getattr(args, "system_prompt", None)
+    template_name = getattr(args, "template", None)
+    if not system_prompt and template_name:
+        from fllm.templates import get_template
+        system_prompt = get_template(template_name)
+        if system_prompt:
+            print(f"  Using template: {template_name}\n")
+
+    client = RemoteClient(
+        base_url=args.url,
+        api_key=getattr(args, "api_key", "fllm"),
+        model=getattr(args, "model", None),
+        timeout=getattr(args, "timeout", 120),
+    )
+
+    # Check connection first
+    print(f"  Connecting to {args.url} …", end=" ", flush=True)
+    health = client.check_connection()
+    model = health.get("model", client.get_model())
+    print(f"ok ({model})\n")
+
+    stream = not getattr(args, "no_stream", False)
+    ask = getattr(args, "ask", None)
+
+    if ask:
+        run_remote_query(client, ask, system_prompt=system_prompt, stream=stream)
+    else:
+        run_remote_chat(client, system_prompt=system_prompt, stream=stream)
+
+
 def cmd_compare(args):
     from fllm.launcher import LLMRunner
     print(BANNER)
@@ -410,6 +465,7 @@ def main():
         "run":      cmd_run,
         "serve":    cmd_serve,
         "metrics":  cmd_metrics,
+        "remote":   cmd_remote,
         "compare":  cmd_compare,
         "bench":    cmd_bench,
     }
